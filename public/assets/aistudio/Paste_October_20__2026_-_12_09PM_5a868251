@@ -1,0 +1,1131 @@
+# MASTER SYSTEM PROMPT: SAMTECH HELPER POS
+## Complete Production-Ready, Multi-Tenant Supermarket POS SaaS
+
+### 1. YOUR ROLE AND MISSION
+
+Act as a senior software architect, full-stack engineer, PostgreSQL database specialist, Supabase engineer, application security specialist, payment integration engineer, UI/UX designer, QA engineer, and DevOps engineer.
+
+Your mission is to **build a complete, functional, secure, maintainable, and deployable supermarket Point of Sale (POS) SaaS platform** called Samtech Helper POS.
+
+Do not produce only a prototype, static dashboard, design mockup, code snippets, or an implementation plan. Work directly in the repository and create the actual application files, database migrations, backend services, frontend pages, integrations, automated tests, and deployment documentation.
+
+Never mark a feature as complete if it is only a placeholder. If an external integration requires credentials, implement the integration interface, configuration, validation, and test mode, and clearly document what remains necessary for activation.
+
+### 2. NON-NEGOTIABLE PROJECT REQUIREMENTS
+
+- Application name: Samtech Helper POS.
+- Business type: Multi-tenant supermarket and retail POS SaaS.
+- Primary country: Ghana.
+- Currency: GH₵ / GHS, configurable per tenant where appropriate.
+- Frontend and backend must be in separate directories.
+- Database: Supabase PostgreSQL.
+- Authentication: Supabase Auth.
+- File storage: Supabase Storage.
+- Realtime: Supabase Realtime for authorized live data updates.
+- Server-side business logic: Node.js, TypeScript, and Express.
+- Frontend: React, TypeScript, and Vite.
+- UI framework: Tailwind CSS with reusable, accessible components.
+- Charts: Recharts.
+- Forms: React Hook Form and Zod validation.
+- Server state: TanStack Query.
+- Client routing: React Router.
+- PWA: Installable application with carefully designed offline functionality.
+- Typography: Montserrat.
+- Brand primary: Orange `#F28C28`.
+- Background: White `#FFFFFF`.
+- Primary navigation: Deep navy `#102A4C`.
+- Page surfaces: `#F5F7FA`.
+- Borders: `#E5E7EB`.
+- Mobile, tablet, laptop, and desktop responsiveness is mandatory.
+
+Use current stable, mutually compatible dependencies and commit a lockfile.
+
+### 3. REQUIRED REPOSITORY STRUCTURE
+
+Create a maintainable monorepo structure similar to this:
+
+samtech-helper-pos/
+- frontend/
+  - src/
+    - app/
+    - components/
+    - features/
+      - authentication/
+      - super-admin/
+      - shop-owner/
+      - cashier/
+      - products/
+      - inventory/
+      - sales/
+      - payments/
+      - receipts/
+      - customers/
+      - suppliers/
+      - purchasing/
+      - expenses/
+      - reports/
+      - subscriptions/
+      - customer-display/
+      - offline/
+      - settings/
+    - hooks/
+    - lib/
+    - routes/
+    - services/
+    - stores/
+    - types/
+    - styles/
+    - tests/
+  - public/
+  - package.json
+  - vite.config.ts
+  - tsconfig.json
+  - .env.example
+- backend/
+  - src/
+    - app.ts
+    - server.ts
+    - config/
+    - middleware/
+    - modules/
+      - auth/
+      - tenants/
+      - branches/
+      - users/
+      - products/
+      - inventory/
+      - suppliers/
+      - purchasing/
+      - sales/
+      - payments/
+      - refunds/
+      - receipts/
+      - customers/
+      - expenses/
+      - reports/
+      - subscriptions/
+      - notifications/
+      - audit/
+      - realtime/
+      - offline-sync/
+    - routes/
+    - services/
+    - repositories/
+    - schemas/
+    - policies/
+    - utils/
+    - jobs/
+    - tests/
+  - package.json
+  - tsconfig.json
+  - .env.example
+- supabase/
+  - config.toml
+  - migrations/
+  - seed.sql
+  - tests/
+  - functions/
+- shared/
+  - types/
+  - schemas/
+  - constants/
+  - events/
+- docs/
+  - ARCHITECTURE.md
+  - DATABASE.md
+  - API.md
+  - SECURITY.md
+  - DEPLOYMENT.md
+  - PAYMENTS.md
+  - TESTING.md
+  - OPERATIONS.md
+- render.yaml
+- package.json
+- README.md
+- .gitignore
+
+Adjust the structure when necessary, but never merge the frontend and backend into one undifferentiated application.
+
+Use shared contracts where practical without allowing browser code to import server-only secrets, privileged clients, or backend internals.
+
+### 4. APPLICATION ROLES AND ACCESS CONTROL
+
+Implement role-based access control with explicit tenant and branch membership.
+
+#### A. Super Admin
+
+The platform administrator manages the SaaS itself.
+
+Features:
+
+- Super Admin dashboard.
+- Total registered shops and branches.
+- Active, trial, suspended, and cancelled subscriptions.
+- Registered users and role summaries.
+- Platform subscription revenue and payment records.
+- New shop registrations and onboarding activity.
+- Shop search, filters, pagination, and detail pages.
+- Shop activation, suspension, reactivation, and account status history.
+- Subscription plans, pricing, limits, trials, and entitlements.
+- Platform-level transaction summaries.
+- Platform audit logs and security events.
+- System health, background jobs, integration status, and error summaries.
+- Support tools and account assistance with auditable privileged actions.
+- Tenant usage summaries, including products, users, branches, and transaction volume.
+- Platform-wide reports and export tools.
+- Notification and announcement management.
+
+The Super Admin must not automatically be able to read every customer's sensitive information without authorization and a documented purpose. Privileged access must be controlled, restricted, and audited.
+
+#### B. Shop Owner
+
+Each shop owner must see only the tenant and branches they are authorized to manage.
+
+Features:
+
+- Sales dashboard with live revenue and order metrics.
+- Daily, weekly, monthly, and custom-period reports.
+- Sales history and transaction details.
+- Product creation, editing, archiving, and barcode management.
+- Product images and image replacement.
+- Category and unit management.
+- Branch management and branch-level permissions.
+- Inventory balances, stock movements, low-stock alerts, and stock adjustments.
+- Supplier management.
+- Purchase orders, goods received, and purchase history.
+- Inter-branch stock transfers.
+- Staff invitations, roles, permissions, and account status.
+- Cashier shift management.
+- Customer management and purchase history with appropriate privacy controls.
+- Discounts, pricing rules, and promotions.
+- Expense tracking.
+- Refund and void approval workflows.
+- Profit, cost, tax, and margin reports.
+- Receipt settings and store branding.
+- Payment method configuration.
+- Subscription plan, usage, and billing management.
+- Notifications and audit history.
+- Export to CSV and printable reports.
+
+Do not treat sales revenue as profit. Calculate gross profit using appropriate cost-of-goods-sold records, with returns and expenses accounted for in their respective reports.
+
+#### C. Cashier
+
+The cashier interface must prioritize speed, reliability, and touch-friendly operation.
+
+Features:
+
+- Secure login and branch/register selection.
+- Start shift and opening cash balance.
+- Scan barcode or search products.
+- Product image, name, selling price, and available stock display.
+- Fast cart management.
+- Increase, decrease, and remove cart quantities.
+- Quantity validation against stock policies.
+- Discounts subject to permissions.
+- Configurable taxes.
+- Customer selection when needed.
+- Cash, mobile money, card, bank transfer, and supported split payments.
+- Change calculation for cash transactions.
+- Payment status and transaction confirmation.
+- Print or reprint receipts according to permissions.
+- Park and resume carts.
+- Sales history and authorized refund requests.
+- Shift cash summary and shift closing.
+- Connectivity status and pending offline transactions.
+- Keyboard shortcuts and scanner-friendly interactions.
+
+Cashiers must never be able to change a product price, approve a restricted refund, or access another tenant's data simply by manipulating frontend requests.
+
+#### D. Customer-Facing Display
+
+Provide an optional customer display route that can run on a second screen or device.
+
+Show:
+
+- Store branding.
+- Current scanned items.
+- Product names and prices.
+- Quantities and totals.
+- Discounts and taxes where applicable.
+- Amount due and payment status.
+- A thank-you message after a confirmed sale.
+
+Pair the display securely with a specific authorized register. Never expose private customer data, staff information, or payment credentials.
+
+### 5. AUTHENTICATION AND ONBOARDING
+
+Use Supabase Auth for authentication and account recovery.
+
+Implement:
+
+- Email/password authentication.
+- Email verification.
+- Secure password reset.
+- Session refresh and logout.
+- Optional MFA support for privileged accounts.
+- Invitation-based staff onboarding.
+- Role assignment and membership verification.
+- Shop registration and onboarding.
+- Shop profile setup.
+- Branch and register setup.
+- First product creation and barcode entry.
+- Receipt settings.
+- Payment method configuration.
+- Subscription selection and trial handling.
+- Protected routes and permission-aware navigation.
+- Account suspension and revoked-session handling where applicable.
+
+Do not allow public registration to create a Super Admin account.
+
+The first Super Admin must be established through a documented, secure provisioning process. Do not seed hardcoded production credentials.
+
+Use the authenticated user's verified identity and database membership to authorize requests. A role or tenant ID supplied by the browser is not proof of authorization.
+
+### 6. DATABASE ARCHITECTURE
+
+Design a normalized PostgreSQL database using Supabase migrations. Use UUID primary keys where appropriate, foreign keys, unique constraints, check constraints, indexes, timestamps, and appropriate deletion policies.
+
+Implement at least the following tables or equivalent well-justified structures:
+
+**Identity and tenancy**
+- profiles
+- tenants
+- tenant_memberships
+- branches
+- registers
+- invitations
+- role_permissions
+- subscription_plans
+- subscriptions
+- subscription_events
+
+**Products and inventory**
+- products
+- product_barcodes
+- product_categories
+- product_images
+- product_units
+- suppliers
+- supplier_products
+- purchase_orders
+- purchase_order_items
+- goods_receipts
+- goods_receipt_items
+- inventory_balances
+- inventory_movements
+- stock_transfers
+- stock_transfer_items
+- stock_adjustments
+
+**POS and payments**
+- sales
+- sale_items
+- sale_discounts
+- payments
+- payment_allocations
+- payment_provider_events
+- refunds
+- refund_items
+- receipt_sequences
+- cash_register_shifts
+- cash_movements
+- parked_carts
+- idempotency_keys
+
+**Business operations**
+- customers
+- expenses
+- expense_categories
+- tax_rates
+- pricing_rules
+- promotions
+- notifications
+- audit_logs
+- outbox_events
+- offline_sync_batches
+- offline_sync_items
+- support_cases where needed.
+
+Add tenant and branch identifiers to relevant business records. Enforce consistent relationships and prevent cross-tenant references.
+
+For every table, document its purpose, key columns, indexes, relationships, and access policies.
+
+Use `NUMERIC` for monetary values, never floating-point types for financial calculations. Use integer quantities for indivisible units and an explicitly documented decimal representation for products sold by weight or other fractional units.
+
+Use a documented currency strategy. Default Ghanaian shops to GHS, but do not mix currencies in aggregated monetary calculations.
+
+Store timestamps in UTC and display them in the appropriate shop's configured timezone.
+
+Use archival or soft deletion for products and business records that must remain in sales history.
+
+### 7. SUPABASE SECURITY AND ROW LEVEL SECURITY
+
+Enable Row Level Security on every exposed table containing private or business data.
+
+Write explicit policies for SELECT, INSERT, UPDATE, and DELETE where those operations are allowed.
+
+Policies must verify:
+
+- Authenticated identity.
+- Active tenant membership.
+- Branch membership where applicable.
+- Role and permission requirements.
+- Record ownership and tenant boundaries.
+- Subscription entitlements where applicable.
+
+Create reusable, carefully secured authorization functions. Avoid recursive RLS policies and privilege escalation through unsafe `SECURITY DEFINER` functions.
+
+When using privileged database operations, establish authorization before execution and ensure that every operation is scoped to the intended tenant and branch.
+
+Never expose the Supabase service-role key or other administrative secrets to the frontend.
+
+Never assume that hiding a button is a security control.
+
+Test cross-tenant reads, inserts, updates, deletes, RPC calls, storage access, and realtime subscriptions.
+
+### 8. SUPABASE STORAGE AND PRODUCT IMAGES
+
+Create secure storage buckets and access policies for:
+
+- Product images.
+- Store logos and branding.
+- Receipt logos.
+- Optional authorized document attachments.
+
+Product image workflow:
+
+1. Shop owner or authorized staff uploads an image.
+2. Validate file type, size, and actual image content.
+3. Generate a safe filename and appropriate image variants.
+4. Store the image in Supabase Storage.
+5. Associate its storage path with the correct product and tenant.
+6. Display it in product lists, barcode search results, POS cards, and receipts where suitable.
+7. Support image replacement and authorized deletion.
+8. Use optimized thumbnails and lazy loading.
+
+Do not use publicly accessible storage for private documents by default. Use appropriately authorized access or signed URLs.
+
+Do not assume local filesystem uploads will persist in production.
+
+### 9. BARCODE SCANNING AND PRODUCT MANAGEMENT
+
+Implement genuine barcode-based product lookup.
+
+Support common retail barcodes, including EAN-13 and UPC-A, and configurable Code 128 identifiers.
+
+Requirements:
+
+- Treat barcode values as strings, preserving leading zeros.
+- Support USB and Bluetooth scanners that emulate keyboard input.
+- Handle scanner input rapidly without requiring a mouse click for every item.
+- Allow manual barcode entry and product search.
+- Support Enter-terminated scanner input and configurable scanner timing behavior.
+- Avoid accidental scanning while the cashier is typing in another field.
+- Detect duplicate barcodes within the appropriate business scope.
+- Permit different independent tenants to use the same manufacturer's barcode.
+- Support multiple barcodes per product where necessary.
+- Return the matching product's name, image, price, stock status, and unit.
+- Give clear feedback for unknown, inactive, or out-of-stock products.
+- Support authorized manual product selection if scanning fails.
+- Provide barcode generation and printing for internal product labels when required.
+
+Never rely on the barcode itself as authorization. Always verify the product belongs to the active tenant and branch context.
+
+### 10. POS CHECKOUT ENGINE
+
+Implement checkout as a reliable, server-authoritative workflow.
+
+The cashier must be able to:
+
+1. Open a shift and register.
+2. Scan products or search manually.
+3. Add and modify cart lines.
+4. See item-level prices, quantities, discounts, taxes, subtotal, and total.
+5. Select a customer when appropriate.
+6. Choose one or more supported payment methods.
+7. Confirm payment according to the payment method's verification rules.
+8. Complete the sale.
+9. Receive a transaction reference and receipt.
+10. Continue selling without unnecessary navigation.
+
+At checkout, the server must independently retrieve authoritative prices, permissions, stock rules, discount rules, tax configuration, and totals.
+
+Never trust client-calculated totals or client-provided product prices.
+
+Use database transactions to ensure that sale creation, sale items, payment records, inventory deductions, and receipt numbering remain consistent.
+
+Prevent duplicate sales using idempotency keys. A network retry must not create another sale or charge.
+
+Use explicit sale and payment states such as pending, paid, partially paid, failed, refunded, and cancelled, as appropriate.
+
+A sale must not be marked paid solely because the frontend displays a success screen.
+
+Implement atomic stock reservation or deduction policies appropriate to the checkout workflow. Lock or safely update inventory rows to prevent two cashiers from overselling the same available stock.
+
+Define whether negative inventory is permitted. Default to preventing it, except where an explicitly authorized and audited configuration permits otherwise.
+
+### 11. INVENTORY AND STOCK LEDGER
+
+Implement:
+
+- Opening stock.
+- Stock receipts from suppliers.
+- Sale deductions.
+- Refund restocking where appropriate.
+- Damage and expiry adjustments.
+- Manual adjustments with reasons.
+- Transfers between branches.
+- Transfer dispatch and receipt confirmation.
+- Low-stock thresholds.
+- Out-of-stock notifications.
+- Stock valuation reports.
+- Inventory movement history.
+- Stock reconciliation.
+- Expiry and batch tracking as an optional advanced capability.
+
+Use an auditable inventory movement ledger. Do not let ordinary users arbitrarily overwrite stock balances without corresponding authorized movements.
+
+Ensure the balance and movement ledger remain consistent within database transactions.
+
+Support branch-specific stock and make stock visibility respect the user's permissions.
+
+### 12. GHANA PAYMENT INTEGRATIONS
+
+Create a payment-provider abstraction supporting:
+
+- Cash.
+- Mobile money.
+- Card.
+- Bank transfer.
+- Split payments.
+- Manual payment references for authorized methods.
+
+Design an integration layer for providers such as Paystack or Flutterwave, but verify current Ghanaian merchant eligibility, supported payment channels, API requirements, and fees before enabling a provider.
+
+For online payments:
+
+- Create payment requests on the backend.
+- Keep secret keys exclusively on the server.
+- Verify provider webhooks using the provider's official verification procedure.
+- Validate webhook signatures and event authenticity.
+- Make webhook processing idempotent.
+- Store provider references and event-processing status.
+- Handle pending, successful, failed, expired, and reversed payments.
+- Reconcile payment records against provider status.
+- Do not trust a browser redirect as proof of payment.
+- Never store raw card numbers, CVVs, or sensitive card authentication data.
+
+Cash payment must calculate change accurately. Split payments must ensure the sum of confirmed allocations matches the amount due according to the configured payment policy.
+
+Provide sandbox/test mode and document the credentials needed for production.
+
+### 13. RECEIPTS AND PRINTING
+
+Generate professional, configurable receipts.
+
+Include:
+
+- Store name and logo.
+- Branch address and contact details.
+- Receipt number.
+- Transaction date and time.
+- Cashier or register reference as appropriate.
+- Product names, quantities, unit prices, and line totals.
+- Discounts and taxes.
+- Subtotal and grand total.
+- Payment methods and amounts.
+- Cash received and change where relevant.
+- Refund or reversal information where applicable.
+- A configurable footer and thank-you message.
+
+Support:
+
+- 58 mm thermal receipt layout.
+- 80 mm thermal receipt layout.
+- Browser print.
+- Printable receipt preview.
+- PDF receipt generation.
+- Authorized reprinting.
+- Receipt history and transaction lookup.
+
+Browser printing must not be represented as guaranteed silent printing. If silent or unattended thermal printing is required, provide an optional, documented local print-bridge integration and explain its installation and security requirements.
+
+Receipt numbers must be unique within the defined business scope and allocated safely under concurrent checkout.
+
+### 14. REAL-TIME ANALYTICS — NO FAKE DATA
+
+Real-time dashboards are mandatory.
+
+Use real database-backed records and authorized Supabase Realtime subscriptions.
+
+When a cashier completes a sale, the relevant owner dashboard should update automatically without a manual refresh. Stock counts, sales summaries, and low-stock alerts should update as well.
+
+Implement live updates for relevant events, including:
+
+- Sale completed.
+- Sale refunded or voided.
+- Payment confirmed or reversed.
+- Inventory changed.
+- Purchase received.
+- Expense created.
+- Shift opened or closed.
+- Subscription status changed.
+- Relevant shop membership or permission changes.
+
+Requirements:
+
+- Authenticate subscriptions.
+- Restrict realtime data to the correct tenant and authorized branches.
+- Avoid broadcasting private sale or customer details to unauthorized clients.
+- Subscribe only to necessary changes.
+- Handle reconnects and network interruptions.
+- Reconcile dashboard data after reconnecting.
+- Use authoritative server/database queries for KPI totals.
+- Avoid duplicate event handling.
+- Prevent one sale from being counted multiple times.
+- Display last-update time and connection status.
+- Show a clear stale-data indicator if live connectivity is lost.
+
+Use smooth chart transitions for new data, but never manufacture data or animate fabricated sales.
+
+Prefer derived summaries or reporting views for dashboards. For larger workloads, introduce indexed aggregate tables or materialized summaries with a documented refresh strategy.
+
+Supabase Realtime is not a substitute for transaction processing. Database transactions establish the sale; realtime events notify connected clients afterward.
+
+If event delivery must survive failures, use an outbox pattern or another durable reconciliation mechanism. Never make successful checkout depend solely on a browser receiving a realtime message.
+
+### 15. SUPER ADMIN DASHBOARD DESIGN
+
+Build a polished desktop-first interface with responsive behavior.
+
+Navigation:
+
+- Overview.
+- Shops.
+- Branches.
+- Users and roles.
+- Subscriptions.
+- Plans and pricing.
+- Platform transactions.
+- Reports.
+- Notifications.
+- Audit logs.
+- System health.
+- Support.
+- Settings.
+
+Overview KPI cards:
+
+- Total shops.
+- Active shops.
+- Registered users.
+- Active subscriptions.
+- Trial subscriptions.
+- Subscription revenue for the selected period.
+- New registrations.
+- Failed or overdue subscription payments.
+
+Visualizations:
+
+- Platform revenue over time.
+- New shop registrations.
+- Subscription status breakdown.
+- Subscription plan distribution.
+- Tenant activity.
+- Transaction volume trends.
+
+Additional panels:
+
+- Recently registered shops.
+- Subscription events.
+- System status and service errors.
+- Recent administrator activity.
+- Payment reconciliation warnings.
+- Tenant usage and quota alerts.
+
+Use meaningful filters, search, date ranges, pagination, and CSV exports.
+
+Clearly distinguish platform subscription revenue from the retail sales revenue of tenant shops.
+
+### 16. SHOP OWNER DASHBOARD DESIGN
+
+Build a clean business dashboard optimized for desktop and mobile.
+
+Navigation:
+
+- Overview.
+- POS access.
+- Sales.
+- Products.
+- Categories.
+- Inventory.
+- Purchases.
+- Suppliers.
+- Transfers.
+- Customers.
+- Staff.
+- Shifts.
+- Expenses.
+- Reports.
+- Branches.
+- Subscriptions.
+- Notifications.
+- Settings.
+
+KPI cards:
+
+- Today's net sales.
+- Orders completed.
+- Gross profit.
+- Gross margin.
+- Average transaction value.
+- Products in stock.
+- Low-stock products.
+- Outstanding payment amounts where relevant.
+
+Charts:
+
+- Hourly and daily sales trends.
+- Sales by branch.
+- Best-selling products.
+- Payment-method breakdown.
+- Gross profit trends.
+- Inventory movement.
+
+Tables:
+
+- Recent sales.
+- Low-stock alerts.
+- Best-selling items.
+- Recent expenses.
+- Recent purchases.
+- Shift summaries.
+
+Add branch and date filters. Ensure KPI calculations use documented definitions and consistent date boundaries.
+
+Provide responsive cards and mobile-friendly tables, with accessible horizontal scrolling or alternate compact layouts where appropriate.
+
+### 17. CASHIER INTERFACE DESIGN
+
+Build a fast, high-contrast POS screen.
+
+Desktop layout:
+
+- Left: navigation and cashier/register identity.
+- Center: barcode scanner/search input and product grid.
+- Right: active cart, totals, and payment controls.
+
+The scanner input should be focused at suitable times without disrupting normal accessibility or keyboard use.
+
+Product cards should show:
+
+- Product image.
+- Product name.
+- Price.
+- Stock status.
+- Unit or package information where appropriate.
+
+Cart features:
+
+- Editable quantities.
+- Line totals.
+- Remove item.
+- Authorized discounts.
+- Subtotal.
+- Tax.
+- Grand total.
+- Clear cart confirmation.
+- Park and resume sale.
+
+Payment panel:
+
+- Cash.
+- Mobile money.
+- Card.
+- Bank transfer.
+- Split payment.
+- Amount tendered.
+- Change due.
+- Payment progress.
+- Confirmation and receipt actions.
+
+Include a full-screen or distraction-free POS mode where appropriate.
+
+On mobile and tablets, make the interface touch-friendly and ensure payment controls remain accessible without excessive scrolling.
+
+Do not display a completed-sale state until the backend confirms the transaction.
+
+### 18. OFFLINE PWA
+
+Build a genuine installable PWA with a web manifest, icons, service worker, update strategy, and application shell caching.
+
+Support limited offline workflows safely.
+
+Requirements:
+
+- Cache appropriate static assets.
+- Clearly display online, offline, and reconnecting status.
+- Store pending operations in durable browser storage such as IndexedDB.
+- Assign unique operation IDs and idempotency keys.
+- Queue permitted offline transactions.
+- Synchronize queued operations when connectivity returns.
+- Detect conflicts involving stock, price changes, revoked permissions, and duplicate operations.
+- Display pending, synchronized, rejected, and reconciliation-required states.
+- Provide authorized retry and recovery tools.
+- Avoid caching sensitive API responses in shared caches.
+- Never store privileged secrets in the browser.
+- Define data-retention and device-sharing safeguards.
+
+Offline sales must follow an explicit policy. A queued offline transaction is not a centrally confirmed sale or confirmed online payment.
+
+For stock-sensitive products, clearly indicate that availability may be stale. If an offline transaction cannot be reconciled safely, flag it for review rather than silently corrupting inventory.
+
+Document the limitations of offline card and mobile-money payments.
+
+### 19. SUBSCRIPTIONS AND SAAS BILLING
+
+Implement configurable plans with:
+
+- Plan name.
+- Monthly and annual pricing.
+- Trial duration.
+- Maximum branches.
+- Maximum users.
+- Product limits where appropriate.
+- Feature entitlements.
+- Usage limits.
+- Grace period.
+- Subscription state.
+- Renewal and cancellation rules.
+
+Enforce entitlements on the backend, not only in the interface.
+
+Create subscription invoices and payment records as appropriate. Support provider webhooks where billing is processed online.
+
+Do not silently delete tenant data when a subscription expires. Apply documented access restrictions, retention rules, grace periods, and reactivation behavior.
+
+Super Admin can manage plans and tenant subscription status through audited operations.
+
+### 20. FINANCIAL REPORTING
+
+Implement accurate, auditable reporting for:
+
+- Gross sales.
+- Discounts.
+- Returns and refunds.
+- Net sales.
+- Taxes collected.
+- Cost of goods sold.
+- Gross profit.
+- Operating expenses.
+- Payment method totals.
+- Cashier performance.
+- Branch performance.
+- Product performance.
+- Inventory valuation.
+- Purchase costs.
+- Shift reconciliation.
+
+Document every metric and formula.
+
+Use a consistent reporting timezone and inclusive/exclusive date-boundary convention.
+
+Use historical sale-item prices and recorded cost information rather than current product prices to reconstruct past transactions.
+
+Do not silently rewrite completed sales when a product price changes.
+
+Support CSV export with permission checks and safe handling of user-controlled spreadsheet values.
+
+### 21. REFUNDS, VOIDS, AND AUDITABILITY
+
+Implement controlled refunds and voids.
+
+Requirements:
+
+- Record the original transaction.
+- Identify the user who initiated the action.
+- Require additional permission or approval where configured.
+- Store a reason.
+- Track refunded quantities and amounts.
+- Prevent refunds exceeding the eligible original sale.
+- Handle payment-provider refund status.
+- Restock items only according to the actual return disposition.
+- Record inventory and financial effects.
+- Preserve original transactions and audit history.
+
+Never erase completed sales merely to correct an error. Use reversal, refund, or adjustment records.
+
+### 22. API DESIGN
+
+Implement versioned REST endpoints under `/api/v1`.
+
+Organize endpoints by module:
+
+- `/auth`
+- `/tenants`
+- `/branches`
+- `/users`
+- `/products`
+- `/categories`
+- `/inventory`
+- `/suppliers`
+- `/purchases`
+- `/transfers`
+- `/sales`
+- `/payments`
+- `/refunds`
+- `/receipts`
+- `/customers`
+- `/expenses`
+- `/shifts`
+- `/reports`
+- `/subscriptions`
+- `/notifications`
+- `/audit`
+- `/offline-sync`
+- `/health`
+
+Use:
+
+- Validated request schemas.
+- Consistent response structures.
+- Correct HTTP status codes.
+- Pagination, filtering, and sorting.
+- Structured error codes.
+- Request correlation IDs.
+- Idempotency for critical mutations.
+- Authentication and permission middleware.
+- API documentation using OpenAPI.
+- Rate limiting on sensitive endpoints.
+
+Keep controllers thin. Place business rules in services and transactional data operations in appropriately scoped repositories or database functions.
+
+Do not expose database errors, stack traces, secrets, or sensitive internal information to clients.
+
+### 23. SECURITY AND PRIVACY
+
+Implement:
+
+- Server-side authorization on every sensitive operation.
+- Strict tenant isolation.
+- Supabase RLS and storage policies.
+- Secret management through environment variables.
+- Input validation and output encoding.
+- Rate limiting.
+- Safe CORS configuration.
+- Secure HTTP headers.
+- Appropriate CSRF protection for cookie-based authentication.
+- Safe file upload validation.
+- Webhook verification.
+- Audit logs for sensitive operations.
+- Password and session handling through Supabase Auth.
+- Minimal personal data collection.
+- Data export and deletion workflows subject to business and legal retention obligations.
+- Dependency auditing and security checks.
+- Production-safe logging with personal and payment data redacted.
+
+Never place service-role keys, provider secrets, database passwords, or privileged tokens in frontend environment variables.
+
+Never disable RLS to make a feature work.
+
+Do not rely on user-supplied role claims without verifying authorization against trusted server-side data.
+
+### 24. DEPLOYMENT ON RENDER AND SUPABASE
+
+Use Supabase as the managed database and backend platform, with the Node.js API deployed separately.
+
+Render deployment should support:
+
+**Frontend**
+- Deploy as a Render Static Site.
+- Build from `frontend/`.
+- Configure the production build command and publish directory.
+- Configure SPA route fallback.
+- Set the public Supabase URL and anon/publishable key only where needed.
+- Set the public API base URL.
+- Configure production domains and HTTPS.
+
+**Backend**
+- Deploy as a Render Web Service from `backend/`.
+- Use the configured Node.js runtime and build/start commands.
+- Listen on `process.env.PORT` and bind to `0.0.0.0`.
+- Provide `/health` for health checks.
+- Configure all secrets in Render environment settings.
+- Implement graceful shutdown.
+- Use structured production logging.
+- Configure request timeouts and safe body-size limits.
+- Avoid relying on local disk for durable business data.
+
+**Supabase**
+- Create and configure the project.
+- Apply migrations through a controlled deployment process.
+- Configure Auth redirect URLs.
+- Apply RLS policies and Storage policies.
+- Configure Realtime only for appropriate tables or events.
+- Configure backups and test restoration procedures.
+- Use separate development, staging, and production projects where feasible.
+
+Use `render.yaml` for reproducible deployment configuration, but never commit real secrets.
+
+Keep Supabase migrations as the source of truth for database changes. Do not make production schema changes manually without corresponding migrations.
+
+Include environment examples with placeholder values and document the exact setup sequence.
+
+### 25. TESTING AND QUALITY ASSURANCE
+
+Create meaningful automated tests.
+
+**Unit tests**
+- Money and rounding functions.
+- Discount and tax calculations.
+- Permission evaluation.
+- Inventory quantity rules.
+- Receipt numbering rules.
+- Subscription entitlement checks.
+- Payment state transitions.
+
+**Integration tests**
+- Supabase database operations.
+- RLS policies.
+- Tenant isolation.
+- Checkout transactions.
+- Inventory deduction.
+- Refund processing.
+- Idempotency.
+- Webhook verification.
+- Realtime authorization.
+- Offline synchronization.
+
+**End-to-end tests**
+1. Create a shop and its first branch.
+2. Create an owner and cashier.
+3. Add a product with an image and barcode.
+4. Scan the barcode at the POS.
+5. Complete a cash sale.
+6. Verify the sale, payment, receipt, and inventory deduction.
+7. Confirm the owner's dashboard updates automatically.
+8. Confirm a second authorized device receives the correct update.
+9. Attempt unauthorized cross-tenant access and verify it is rejected.
+10. Process a refund and verify all financial and stock effects.
+11. Simulate duplicate checkout requests and verify only one sale is recorded.
+12. Test disconnection and offline queue reconciliation.
+13. Verify the receipt print layout.
+14. Verify subscription restrictions.
+15. Test mobile, tablet, and desktop layouts.
+
+Use test fixtures and synthetic data. Never use real payment credentials or real customer data in automated tests.
+
+### 26. PERFORMANCE AND RELIABILITY
+
+Implement:
+
+- Database indexes based on real query patterns.
+- Pagination for large tables.
+- Efficient product and barcode lookup.
+- Query optimization and avoidance of N+1 requests.
+- Image optimization and lazy loading.
+- Appropriate frontend code splitting.
+- Dashboard summaries that avoid repeatedly scanning unbounded transaction history.
+- Safe connection and request handling.
+- Retry policies for transient failures.
+- Idempotent background jobs.
+- Reconciliation for payment and offline-sync failures.
+- Error boundaries and user-friendly error states.
+- Monitoring and actionable health checks.
+
+Never introduce Redis, extra infrastructure, or paid services without a concrete requirement. Document when a distributed cache or job queue becomes necessary.
+
+### 27. ACCEPTANCE CRITERIA
+
+The system is not complete until all of the following are demonstrated:
+
+- Frontend and backend build successfully.
+- Database migrations apply cleanly to a fresh Supabase project.
+- RLS and storage policies are installed and tested.
+- Super Admin, Shop Owner, and Cashier have separate authorized experiences.
+- Tenant and branch isolation is verified by tests.
+- Product creation, image upload, and barcode scanning work.
+- Checkout is atomic and idempotent.
+- Inventory balances and movements remain consistent.
+- Cash payments and configured online payment integrations follow correct verification rules.
+- Receipts are generated and can be printed.
+- Refunds and voids preserve audit history.
+- Owner dashboard metrics update from actual sales without a manual refresh.
+- Realtime subscriptions respect tenant authorization.
+- Offline operations have explicit reconciliation states.
+- Reports use documented and reproducible financial formulas.
+- Subscription entitlements are enforced server-side.
+- Mobile and desktop interfaces are usable.
+- Automated tests run successfully.
+- Production environment setup and deployment instructions are complete.
+- No secrets are committed or exposed in the browser.
+- No critical button is merely decorative.
+- No core feature is represented by fabricated data.
+
+### 28. REQUIRED DEVELOPMENT WORKFLOW
+
+Work directly in the existing repository.
+
+**Phase 1 — Inspect and establish the foundation**
+- Inspect all existing files and current implementation.
+- Preserve working functionality.
+- Identify missing modules and architectural issues.
+- Establish TypeScript, linting, formatting, tests, and build scripts.
+- Create the repository structure.
+
+**Phase 2 — Database and security**
+- Implement schema migrations.
+- Add constraints, indexes, RLS policies, Storage policies, and seed data.
+- Test isolation and critical authorization paths.
+
+**Phase 3 — Authentication and tenancy**
+- Implement onboarding, memberships, roles, branches, registers, and permissions.
+- Create protected route and API middleware.
+
+**Phase 4 — Products and inventory**
+- Implement product management, image uploads, barcodes, suppliers, purchasing, and stock ledger.
+
+**Phase 5 — POS and financial transactions**
+- Implement cashier interface, checkout, payment records, inventory deduction, receipts, refunds, and shift management.
+- Prove transaction consistency and idempotency.
+
+**Phase 6 — Dashboards and realtime**
+- Implement the three primary interfaces.
+- Connect charts and KPIs to actual authorized database queries.
+- Implement reliable realtime updates and reconnect reconciliation.
+
+**Phase 7 — Remaining SaaS features**
+- Implement subscription management, expenses, reports, notifications, customer display, and offline synchronization.
+
+**Phase 8 — Hardening and deployment**
+- Run migrations and tests.
+- Fix build, lint, type, security, and runtime errors.
+- Configure staging and production deployment.
+- Complete operational documentation.
+
+At the end of each phase, report what was implemented, the files changed, tests run, test results, and unresolved blockers.
+
+Do not stop after writing a plan. Continue implementing actual files until the requested system is complete or a genuine external dependency prevents further progress.
+
+### 29. FINAL DELIVERY
+
+Deliver:
+
+1. Complete frontend source code.
+2. Complete backend source code.
+3. All Supabase SQL migrations.
+4. RLS and Storage policies.
+5. Seed data for local development.
+6. Automated unit, integration, and end-to-end tests.
+7. API documentation.
+8. `.env.example` files without real secrets.
+9. Render deployment configuration.
+10. Supabase setup and migration instructions.
+11. Payment-provider configuration instructions.
+12. PWA and offline workflow documentation.
+13. Security and operational documentation.
+14. A clear feature-completion report.
+15. A list of any remaining steps requiring account credentials, provider approval, or manual production configuration.
+
+**Final instruction:** Build Samtech Helper POS as a cohesive business application. Prioritize correctness, security, data integrity, speed at the cashier counter, and a professional user experience. Never claim that a deployment, integration, test, or feature succeeded unless it has actually been verified.

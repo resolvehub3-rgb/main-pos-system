@@ -1,0 +1,38 @@
+services:
+  # 1. Backend Web Service (Node.js/Express)
+  - type: web
+    name: samtech-helper-pos-backend
+    runtime: node
+    plan: standard
+    region: frankfurt
+    buildCommand: npm install && npm run build:backend
+    startCommand: npm run start:backend
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+    healthCheckPath: /api/v1/health
+
+  # 2. Frontend Static Site (Vite React SPA)
+  - type: static
+    name: samtech-helper-pos-frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_API_URL
+        value: https://samtech-helper-pos-backend.onrender.com/api/v1
