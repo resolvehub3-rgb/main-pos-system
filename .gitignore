@@ -7,6 +7,12 @@ coverage/
 .env*
 !.env.example
 
+# pnpm is this repo's package manager: pnpm-lock.yaml and pnpm-workspace.yaml
+# are committed. Every other package manager's lockfile is ignored so a stray
+# install can never land a second, conflicting one.
+bun.lock
+bun.lockb
+
 # Local print bridge runtime artifacts.
 # Spooled receipts (may contain real sale data) and the shared secret must
 # never be committed.
