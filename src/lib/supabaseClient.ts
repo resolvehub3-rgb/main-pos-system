@@ -33,6 +33,7 @@ import {
   syncBranch,
   syncUser,
   syncUserStatus,
+  syncUserDelete,
   syncProduct,
   syncProductDelete,
   syncCustomer,
@@ -327,6 +328,9 @@ class DatabaseService {
               this.handleRealtimeCategory(payload);
             }
           )
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload) => {
+            this.handleRealtimeUser(payload);
+          })
           .subscribe();
       } catch (rtErr) {
         console.warn('Supabase Realtime subscription note:', rtErr);
@@ -462,6 +466,34 @@ class DatabaseService {
       const before = this.categories.length;
       this.categories = this.categories.filter((c) => c.id !== id);
       if (this.categories.length !== before) this.notify();
+    }
+  }
+
+  /**
+   * Staff roster changes made in another session.
+   *
+   * This is what makes deleting a cashier from one till drop it on every other
+   * open session without a reload. A DELETE arrives keyed by the UUID, which
+   * {@link resolveEchoId} maps back to the app id — so only rows this session
+   * actually holds (and therefore backfilled) are affected, and an echo of a
+   * row this tab just removed is a harmless no-op.
+   *
+   * UPDATE is handled too, so toggling an account active/inactive propagates
+   * alongside deletion and the roster cannot drift between sessions.
+   */
+  private handleRealtimeUser(payload: any) {
+    const id = this.resolveEchoId(payload);
+    if (!id) return;
+    if (payload.eventType === 'DELETE') {
+      const before = this.users.length;
+      this.users = this.users.filter((u) => u.id !== id);
+      if (this.users.length !== before) this.notify();
+    } else if (payload.eventType === 'UPDATE' && payload.new) {
+      const idx = this.users.findIndex((u) => u.id === id);
+      if (idx !== -1) {
+        this.users[idx] = { ...this.users[idx], ...payload.new, id };
+        this.notify();
+      }
     }
   }
 
@@ -1491,7 +1523,9 @@ class DatabaseService {
   public addUser(user: Omit<UserAccount, 'id' | 'created_at'>): UserAccount {
     const newUser: UserAccount = {
       ...user,
-      id: `user-${Date.now()}`,
+      // Random suffix: two staff saved inside the same millisecond would
+      // otherwise share an id, and Delete/Disable would hit the wrong row.
+      id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       created_at: new Date().toISOString(),
     };
     this.users.unshift(newUser);
@@ -1511,6 +1545,40 @@ class DatabaseService {
       // this fix), and an UPDATE against the raw app id would match no row.
       syncUser(this.supabaseClient, u);
     }
+    this.notify();
+    return true;
+  }
+
+  /**
+   * Remove a staff account outright, mirroring the delete so every other open
+   * session drops it in real time.
+   *
+   * Two refusals, both of which would otherwise strand the shop:
+   *  - the account you are signed in as (nobody left to manage staff), and
+   *  - a super admin, which is global infrastructure rather than shop staff.
+   *
+   * History is untouched: sales and movements store the operator's *name*, so
+   * receipts printed before the deletion still read correctly.
+   */
+  public deleteUser(userId: string): boolean {
+    const target = this.users.find((u) => u.id === userId);
+    if (!target) return false;
+
+    if (this.currentUser && this.currentUser.id === userId) {
+      console.warn('Refusing to delete the account that is currently signed in.');
+      return false;
+    }
+    if (target.role === 'super_admin') {
+      console.warn('Refusing to delete a super admin account.');
+      return false;
+    }
+
+    this.users.splice(this.users.indexOf(target), 1);
+
+    if (this.supabaseClient) {
+      syncUserDelete(this.supabaseClient, userId);
+    }
+
     this.notify();
     return true;
   }

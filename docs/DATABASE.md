@@ -74,6 +74,7 @@ to re-run).
 | `20261024000001_stock_book_and_categories.sql` | Stock-book columns, category hierarchy, widened movement types. |
 | `20261024000002_app_sync_compat.sql` | Creates `public.users`, adds the `sales`/`products`/`customers` columns the app sends, drops foreign keys pointing at empty `profiles`/`auth.users`, relaxes RLS for anon writes. |
 | `20261024000003_mirror_unique_constraints.sql` | Drops four UNIQUE constraints the app does not enforce, which were discarding valid mirrored rows (see below). |
+| `20261024000004_realtime_users.sql` | Adds `public.users` to the `supabase_realtime` publication so deleting or disabling a cashier reaches other open sessions (see below). |
 
 ### Why `20261024000002` was needed
 
@@ -106,6 +107,26 @@ is a silent data-loss path:
 `product_categories(tenant_id, name)` is deliberately **left UNIQUE** —
 `addCategory` rejects duplicates before syncing, so it can never reject a row
 the app considers valid.
+
+### Why `20261024000004` was needed
+
+Deleting a cashier is only "real time" if the deletion reaches sessions other
+than the one that performed it. Supabase Realtime will not broadcast a table
+that is not in the `supabase_realtime` publication, and `public.users` never
+was — the publication was seeded with `sales`, `products`,
+`inventory_movements` and `cash_register_shifts`, and `product_categories` was
+added in `20261024000001`.
+
+The failure mode is completely silent: the client subscribes, Supabase accepts
+the subscription, and the handler simply never fires. Nothing is logged and no
+error is returned, so a delete would look like it worked on the originating
+device while every other till kept showing the removed cashier.
+
+RLS and the `DELETE` grant for `anon` were already in place from
+`20261024000002`, so this migration is only the publication entry.
+
+Known gap: `public.tenants` is subscribed by the app but is also unpublished,
+so `handleRealtimeTenant` never fires either. Left for its own migration.
 
 ## Tables the app actually writes
 

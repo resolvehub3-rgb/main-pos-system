@@ -498,6 +498,17 @@ export function syncProductDelete(c: SyncClient, productId: string): void {
   push('products', () => c.from('products').delete().eq('id', toUuid(productId)));
 }
 
+/**
+ * Remove a staff account.
+ *
+ * Deleting the row does not disturb history that merely *named* the person:
+ * sales carry a denormalised `cashier_name` and movements a `created_by_name`,
+ * so past receipts still show who rang them up after the login is gone.
+ */
+export function syncUserDelete(c: SyncClient, userId: string): void {
+  push('users', () => c.from('users').delete().eq('id', toUuid(userId)));
+}
+
 export function syncTenantStatus(
   c: SyncClient,
   tenantId: string,

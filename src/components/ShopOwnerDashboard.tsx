@@ -173,6 +173,7 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [staffError, setStaffError] = useState('');
   const [staffCreatedMsg, setStaffCreatedMsg] = useState('');
+  const [staffRemovedMsg, setStaffRemovedMsg] = useState('');
 
   // Sales page filters — re-derived live as sales land.
   // Remembered per shop so a round-trip to the till doesn't lose them; see
@@ -463,6 +464,22 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
     setShowStaffPassword(false);
     setStaffCreatedMsg(`${created.full_name} can now sign in with ${created.email}`);
     setShowAddStaffModal(false);
+  };
+
+  /**
+   * Remove a staff member outright.
+   *
+   * The confirm dialog names the person because the row vanishes from the
+   * table the instant the call returns — there is no undo. The service refuses
+   * the two accounts that would strand the shop (you, and a super admin), so a
+   * denied delete simply shows nothing rather than a false confirmation.
+   */
+  const handleDeleteStaff = (staffId: string, name: string) => {
+    const question = `Delete ${name}? Their login stops working straight away and this cannot be undone.`;
+    if (!confirm(question)) return;
+    if (db.deleteUser(staffId)) {
+      setStaffRemovedMsg(`${name} has been removed from this shop`);
+    }
   };
 
   // Handle refund
@@ -1496,6 +1513,19 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
               </div>
             )}
 
+            {/* Real-time confirmation after a cashier is deleted */}
+            {staffRemovedMsg && (
+              <div className="mb-4 flex items-center justify-between gap-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold">
+                <span>{staffRemovedMsg} — their login no longer works.</span>
+                <button
+                  onClick={() => setStaffRemovedMsg('')}
+                  className="text-rose-600 hover:text-rose-900 font-bold"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
@@ -1525,12 +1555,28 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                         </span>
                       </td>
                       <td className="py-3 text-right">
-                        <button
-                          onClick={() => db.toggleUserStatus(s.id)}
-                          className="text-[#F28C28] font-bold hover:underline"
-                        >
-                          {s.is_active ? 'Disable' : 'Enable'}
-                        </button>
+                        <div className="flex items-center justify-end gap-3">
+                          <button
+                            onClick={() => db.toggleUserStatus(s.id)}
+                            className="text-[#F28C28] font-bold hover:underline"
+                          >
+                            {s.is_active ? 'Disable' : 'Enable'}
+                          </button>
+                          {/*
+                            Deletable by anyone but yourself — the service also
+                            refuses super admins. Both guards are hidden here so
+                            the owner never sees a control that would do nothing.
+                          */}
+                          {s.id !== db.getCurrentUser()?.id &&
+                            s.role !== 'super_admin' && (
+                              <button
+                                onClick={() => handleDeleteStaff(s.id, s.full_name)}
+                                className="text-rose-600 font-bold hover:underline"
+                              >
+                                Delete
+                              </button>
+                            )}
+                        </div>
                       </td>
                     </tr>
                   ))}

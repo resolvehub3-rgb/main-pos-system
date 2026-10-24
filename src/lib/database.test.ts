@@ -55,3 +55,53 @@ test('addProduct and processSale performs atomic stock deduction and records sal
   const updatedProduct = db.getProductByBarcode('6001239874561')!;
   assert.equal(updatedProduct.stock_quantity, 18);
 });
+
+test('deleteUser removes a cashier but refuses to strand the shop', () => {
+  const owner = db.addUser({
+    tenant_id: 'tenant-delete-1',
+    shop_name: 'Delete Test Mart',
+    full_name: 'Owning Manager',
+    email: 'owner-delete@example.com',
+    phone: '+233 20 111 2222',
+    role: 'shop_owner',
+    password: 'secret1',
+    is_active: true,
+  });
+  const cashier = db.addUser({
+    tenant_id: 'tenant-delete-1',
+    shop_name: 'Delete Test Mart',
+    full_name: 'Till Operator',
+    email: 'cashier-delete@example.com',
+    phone: '+233 20 333 4444',
+    role: 'cashier',
+    password: 'secret2',
+    is_active: true,
+  });
+  const root = db.addUser({
+    full_name: 'Platform Admin',
+    email: 'root-delete@example.com',
+    phone: '+233 20 555 6666',
+    role: 'super_admin',
+    password: 'secret3',
+    is_active: true,
+  });
+
+  assert.notEqual(owner.id, cashier.id, 'staff created together need distinct ids');
+
+  const signedInAs = db.getCurrentUser();
+  db.setCurrentUser(owner);
+  try {
+    assert.equal(db.deleteUser(owner.id), false, 'the signed-in account must survive');
+    assert.ok(db.getUsers().some((u) => u.id === owner.id), 'owner row is still listed');
+
+    assert.equal(db.deleteUser(root.id), false, 'a super admin is not shop staff');
+    assert.ok(db.getUsers().some((u) => u.id === root.id), 'super admin row is untouched');
+
+    assert.equal(db.deleteUser(cashier.id), true, 'a cashier can be deleted');
+    assert.equal(db.getUsers().some((u) => u.id === cashier.id), false, 'cashier row is gone');
+
+    assert.equal(db.deleteUser(cashier.id), false, 'deleting twice is a no-op, not a crash');
+  } finally {
+    db.setCurrentUser(signedInAs);
+  }
+});
