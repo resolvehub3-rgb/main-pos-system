@@ -44,6 +44,7 @@ import {
   syncAudit,
   setTenantLookup,
   fromUuid,
+  bindMirrorId,
 } from './sync.ts';
 
 // Environment variables for real Supabase deployment
@@ -1600,14 +1601,56 @@ class DatabaseService {
     this.notify();
   }
 
-  public login(identifier: string, password?: string): { success: boolean; user?: UserAccount; message?: string } {
+  /**
+   * Start a session for an identifier this device knows — or, failing that,
+   * one the mirror holds.
+   *
+   * Local is checked first: it is the source of truth for this device and the
+   * fast path for every till that has already seen the person. Only when the
+   * account is absent here do we read from Supabase.
+   *
+   * That read is the one deliberate exception to this app's one-way mirror,
+   * and it exists for a concrete reason: an account created on the owner's
+   * machine is written to the mirror but never sent anywhere else — the app
+   * does not subscribe to inserts — so without this lookup a cashier could
+   * only ever sign in on the machine that created them. Their shop comes with
+   * them for the same reason: a till with nowhere to open is not signed in.
+   *
+   * A row found remotely is adopted, not copied back. Its ids are registered
+   * so realtime events for it resolve here, and it is stored *without* being
+   * re-pushed — the mirror already holds it. Every later attempt on this
+   * device is local again.
+   */
+  public async login(
+    identifier: string,
+    password?: string
+  ): Promise<{ success: boolean; user?: UserAccount; message?: string }> {
     const cleanId = identifier.trim().toLowerCase();
-    const user = this.users.find(
-      (u) =>
-        u.email.toLowerCase() === cleanId ||
-        u.phone.replace(/[\s+-]/g, '') === cleanId.replace(/[\s+-]/g, '') ||
-        u.full_name.toLowerCase() === cleanId
-    );
+    const matches = (u: UserAccount) =>
+      u.email.toLowerCase() === cleanId ||
+      u.phone.replace(/[\s+-]/g, '') === cleanId.replace(/[\s+-]/g, '') ||
+      u.full_name.toLowerCase() === cleanId;
+
+    let user: UserAccount | undefined = this.users.find(matches);
+
+    if (!user && this.supabaseClient) {
+      const remote = await this.lookupRemoteUser(identifier);
+      if (remote) {
+        // Register before anything else touches these ids: the mirror keys
+        // rows by its own UUID, and a realtime DELETE or status change from
+        // another till has to resolve to the row adopted below.
+        bindMirrorId(remote.id);
+        bindMirrorId(remote.tenant_id);
+        await this.adoptRemoteShop(remote.tenant_id);
+
+        user = this.users.find((u) => u.id === remote.id);
+        if (!user) {
+          this.users.unshift(remote);
+          user = remote;
+        }
+        this.notify();
+      }
+    }
 
     if (!user) {
       return { success: false, message: 'Account not found. Please verify your email or register.' };
@@ -1624,6 +1667,79 @@ class DatabaseService {
 
     this.setCurrentUser(user);
     return { success: true, user };
+  }
+
+  /**
+   * Find an account in the mirror using the same identifiers {@link login}
+   * accepts locally.
+   *
+   * Each probe is a narrow single-row read, and the first hit stops the chain:
+   * a device that has never seen this shop learns about exactly one account
+   * and its shop, never the roster — least of all everyone else's password.
+   */
+  private async lookupRemoteUser(raw: string): Promise<UserAccount | null> {
+    const client = this.supabaseClient;
+    if (!client) return null;
+
+    const asTyped = raw.trim();
+    const probes: Array<{ column: 'email' | 'phone' | 'full_name'; value: string; pattern: boolean }> = [
+      { column: 'email', value: asTyped.toLowerCase(), pattern: false },
+      { column: 'phone', value: asTyped, pattern: false },
+      // `ilike` so the name matches case-insensitively as the local lookup
+      // does; `%` and `_` are escaped so they stay literal text.
+      { column: 'full_name', value: asTyped.replace(/[\\%_]/g, (m) => `\\${m}`), pattern: true },
+    ];
+
+    for (const probe of probes) {
+      const query = client.from('users').select('*').limit(1);
+      const { data, error } = probe.pattern
+        ? await query.ilike(probe.column, probe.value)
+        : await query.eq(probe.column, probe.value);
+
+      if (error) {
+        console.warn(`Remote sign-in lookup failed on ${probe.column}:`, error.message);
+        return null;
+      }
+      const row = (data ?? [])[0] as UserAccount | undefined;
+      if (row) return row;
+    }
+
+    return null;
+  }
+
+  /**
+   * Pull a shop onto a device that has never seen it, so a mirrored account
+   * has somewhere to open.
+   *
+   * Fetched once at sign-in and never written back — the mirror is already
+   * the copy — and only when the device does not hold the row, so a till that
+   * was seeded locally keeps its own.
+   */
+  private async adoptRemoteShop(tenantId?: string): Promise<void> {
+    const client = this.supabaseClient;
+    if (!client || !tenantId) return;
+
+    if (!this.tenants.some((t) => t.id === tenantId)) {
+      const { data, error } = await client.from('tenants').select('*').eq('id', tenantId).limit(1);
+      if (error) {
+        console.warn('Remote sign-in could not load the shop:', error.message);
+      } else if (data?.length) {
+        const tenant = data[0] as Tenant;
+        bindMirrorId(tenant.id);
+        this.tenants.push(tenant);
+      }
+    }
+
+    if (!this.branches.some((b) => b.tenant_id === tenantId)) {
+      const { data, error } = await client.from('branches').select('*').eq('tenant_id', tenantId);
+      if (error) {
+        console.warn('Remote sign-in could not load the branches:', error.message);
+      } else if (data?.length) {
+        const branches = data as Branch[];
+        branches.forEach((b) => bindMirrorId(b.id));
+        this.branches.push(...branches);
+      }
+    }
   }
 
   public register(data: {

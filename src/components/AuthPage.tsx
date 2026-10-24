@@ -65,8 +65,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      const result = db.login(loginEmail, loginPassword);
+    setTimeout(async () => {
+      const result = await db.login(loginEmail, loginPassword);
       setLoading(false);
       if (result.success && result.user) {
         onLoginSuccess(result.user);

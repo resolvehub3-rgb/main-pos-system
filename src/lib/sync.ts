@@ -39,6 +39,11 @@ import type {
 /** Fixed namespace so the same app id maps to the same UUID on every device. */
 const SYNC_NAMESPACE = '6f9619ff-8b86-d011-b42d-00c04fc964ff';
 
+/** Well-formed UUID — the shape every id in the mirror already has. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const isUuid = (value: string): boolean => UUID_PATTERN.test(value);
+
 /**
  * Reverse index: UUID → app id, for every id this session has mapped.
  *
@@ -55,13 +60,41 @@ export function fromUuid(uuid: string | undefined | null): string | undefined {
 }
 
 /**
+ * Bind a row this device read back from the mirror to this session.
+ *
+ * A second till fetching an account or a shop at sign-in receives ids it did
+ * not mint. Recording `uuid → uuid` means a later re-sync of that row upserts
+ * the row it came from instead of inserting a second copy under a freshly
+ * hashed id, and that realtime events for it resolve to the local row, so
+ * status changes and deletions made elsewhere still land here.
+ *
+ * Anything that is not already a UUID is left alone: it is an app id and
+ * {@link toUuid} will derive one when it is actually written.
+ */
+export function bindMirrorId(id: string | undefined | null): string | undefined {
+  if (!id || !isUuid(id)) return undefined;
+  appIdsByUuid.set(id, id);
+  return id;
+}
+
+/**
  * Deterministic UUID (v5 shape) derived from an app id.
  *
  * Uses FNV-1a over four byte ranges to fill 16 bytes, then stamps the RFC-4122
  * version (5) and variant (10xx) bits so the result is a well-formed UUID.
  * Deterministic — not cryptographic — which is exactly what upserts need.
+ *
+ * An id that is already a UUID is returned unchanged. Rows adopted from the
+ * mirror carry the database's own keys, and re-hashing one would invent a
+ * second identity for a row that exists — plus point every `tenant_id` written
+ * from this device at a row nobody has.
  */
 export function toUuid(appId: string): string {
+  if (isUuid(appId)) {
+    appIdsByUuid.set(appId, appId);
+    return appId;
+  }
+
   const key = `${SYNC_NAMESPACE}:${appId}`;
   const bytes = new Uint8Array(16);
 

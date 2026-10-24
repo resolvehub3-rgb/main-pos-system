@@ -26,7 +26,7 @@ test('register creates new shop owner and dedicated supermarket tenant in databa
   assert.strictEqual(createdTenant?.name, 'Antwi Supermarket Osu');
 });
 
-test('login verifies valid registered user credentials and sets current user', () => {
+test('login verifies valid registered user credentials and sets current user', async () => {
   const email = `login_test_${Date.now()}@mart.com`;
   db.register({
     full_name: 'Ama Serwaa',
@@ -37,14 +37,14 @@ test('login verifies valid registered user credentials and sets current user', (
     shop_name: 'Ama Mart Spintex',
   });
 
-  const result = db.login(email, 'password789');
+  const result = await db.login(email, 'password789');
   assert.strictEqual(result.success, true);
   assert.strictEqual(result.user?.email, email);
   assert.strictEqual(db.getCurrentUser()?.email, email);
 });
 
-test('login rejects unknown emails', () => {
-  const result = db.login('nonexistent@user.com', 'password123');
+test('login rejects unknown emails', async () => {
+  const result = await db.login('nonexistent@user.com', 'password123');
   assert.strictEqual(result.success, false);
   assert.ok(result.message);
 });

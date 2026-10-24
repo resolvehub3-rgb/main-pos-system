@@ -13,6 +13,7 @@ import {
   syncTenant,
   tenantRow,
   toUuid,
+  bindMirrorId,
   userRow,
   type SyncClient,
 } from './sync.ts';
@@ -59,6 +60,42 @@ test('fromUuid resolves a UUID back to the app id that produced it', () => {
   assert.equal(fromUuid('00000000-0000-0000-0000-000000000000'), undefined);
   assert.equal(fromUuid(undefined), undefined);
   assert.equal(fromUuid(null), undefined);
+});
+
+test('an id already in mirror form is the row identity, not input to be hashed', () => {
+  const mirrorId = '1f50ae65-340b-5f00-aa20-d15f51b19202';
+
+  assert.equal(toUuid(mirrorId), mirrorId, 're-hashing would invent a second row');
+  assert.equal(fromUuid(mirrorId), mirrorId, 'and this session must still recognise it');
+
+  // The failure this prevents: a till that adopted a shop writes products and
+  // sales under that tenant id. Hashed again, every one of those foreign keys
+  // would point at a tenant nobody has.
+  assert.equal(tenantRow({ ...tenant, id: mirrorId }).id, mirrorId);
+  assert.equal(
+    userRow({
+      id: '9ad23b0e-1e2c-5f4a-8e1f-0b5f0f9c1d77',
+      tenant_id: mirrorId,
+      full_name: 'Adopted Cashier',
+      email: 'cashier@example.com',
+      phone: '+233 24 000 0000',
+      role: 'cashier',
+      is_active: true,
+      created_at: now,
+    }).tenant_id,
+    mirrorId,
+  );
+});
+
+test('bindMirrorId claims an adopted row without inventing an identity for it', () => {
+  const mirrorId = 'd4946dc8-1302-557d-98b5-1b1ed8ac0cb3';
+
+  assert.equal(bindMirrorId(mirrorId), mirrorId);
+  assert.equal(fromUuid(mirrorId), mirrorId, 'a DELETE from another till resolves here');
+
+  assert.equal(bindMirrorId('tenant-local-1'), undefined, 'an app id has no mirror identity yet');
+  assert.equal(bindMirrorId(undefined), undefined);
+  assert.equal(bindMirrorId(null), undefined);
 });
 
 test('tenantRow sends only columns the tenants table has', () => {
