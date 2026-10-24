@@ -119,34 +119,46 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          {/* Customer Dual-Screen button (for POS or Shop Owner preview) */}
-          <button
-            onClick={onOpenCustomerDisplay}
-            title="Open Customer-Facing Dual Screen"
-            className="hidden md:flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-medium transition"
-          >
-            <Monitor className="w-3.5 h-3.5 text-[#F28C28]" />
-            <span className="hidden xl:inline">Customer Display</span>
-          </button>
+          {/* Customer Dual-Screen button (Super Admin preview only; cashiers open it inside the till) */}
+          {currentRole === 'super_admin' && (
+            <button
+              onClick={onOpenCustomerDisplay}
+              title="Open Customer-Facing Dual Screen"
+              className="hidden md:flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-medium transition"
+            >
+              <Monitor className="w-3.5 h-3.5 text-[#F28C28]" />
+              <span className="hidden xl:inline">Customer Display</span>
+            </button>
+          )}
 
-          {/* Supabase Status / Configuration Modal Button */}
-          <button
-            onClick={onOpenSupabaseModal}
-            className="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-semibold transition"
-          >
-            <span className="relative flex h-2 w-2">
-              <span
-                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isConnectedToSupabase ? 'bg-emerald-400' : 'bg-emerald-400'
+          {/* Database connection: animated icon for shop owners & cashiers, full config control for Super Admin */}
+          {currentRole === 'super_admin' ? (
+            <button
+              onClick={onOpenSupabaseModal}
+              className="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-semibold transition"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-emerald-400"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <Database className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden xl:inline">
+                {isConnectedToSupabase ? 'Supabase Live' : 'Supabase (DB Active)'}
+              </span>
+            </button>
+          ) : (
+            <div
+              title={isConnectedToSupabase ? 'Cloud database connected' : 'Local database active'}
+              aria-label={isConnectedToSupabase ? 'Cloud database connected' : 'Local database active'}
+              className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-800/90 border border-slate-700"
+            >
+              <Database
+                className={`w-4 h-4 ${
+                  isConnectedToSupabase ? 'text-emerald-400 animate-pulse' : 'text-slate-400 animate-pulse'
                 }`}
-              ></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <Database className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="hidden xl:inline">
-              {isConnectedToSupabase ? 'Supabase Live' : 'Supabase (DB Active)'}
-            </span>
-          </button>
+              />
+            </div>
+          )}
 
           {/* Profile Dropdown at the top corner with Logout Button */}
           <div className="relative" ref={profileRef}>

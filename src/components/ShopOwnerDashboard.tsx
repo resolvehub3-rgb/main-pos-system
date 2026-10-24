@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -24,7 +24,15 @@ import {
   Edit2,
   CheckCircle2,
   Eye,
+  EyeOff,
   SlidersHorizontal,
+  Printer,
+  Volume2,
+  Calendar,
+  Usb,
+  RefreshCw,
+  BookOpen,
+  Tags,
 } from 'lucide-react';
 import {
   BarChart,
@@ -36,8 +44,26 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { formatGHS } from '../lib/money';
+import {
+  loadSalesViewFilters,
+  saveSalesViewFilters,
+  type SalesViewFilters,
+} from '../lib/salesViewFilters';
 import { db } from '../lib/supabaseClient';
-import { Product, Sale, Tenant, Customer, Expense, UserAccount } from '../types';
+import { playScannerBeep } from '../lib/sound';
+import { useTerminalSettings, updateTerminalSettings } from '../lib/terminalSettings';
+import {
+  checkBridge,
+  sendTestPage,
+  listBridgePrinters,
+  bridgeUrl,
+  type BridgeStatus,
+} from '../lib/printBridge';
+import { Product, Sale, Tenant, Customer, Expense, UserAccount, InventoryMovementType } from '../types';
+import { CategoryManager } from './CategoryManager';
+import { StockBookView } from './StockBookView';
+import { estimateStockDays, effectiveUnitCost, MOVEMENT_TYPE_LABELS, movementDelta } from '../lib/stockBook';
+import { canAdjustStock } from '../lib/permissions';
 
 interface ShopOwnerDashboardProps {
   currentTenant: Tenant;
@@ -59,6 +85,8 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
     | 'sales'
     | 'inventory'
     | 'products'
+    | 'stockbook'
+    | 'categories'
     | 'customers'
     | 'staff'
     | 'expenses'
@@ -73,6 +101,55 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   const [showStockAdjustModal, setShowStockAdjustModal] = useState<Product | null>(null);
   const [stockAdjustQty, setStockAdjustQty] = useState('10');
   const [stockAdjustReason, setStockAdjustReason] = useState('Restock shipment from supplier');
+  const [stockAdjustType, setStockAdjustType] = useState<InventoryMovementType>('restock');
+  const [stockAdjustUnitCost, setStockAdjustUnitCost] = useState('');
+  const [stockAdjustError, setStockAdjustError] = useState('');
+
+  // Terminal hardware settings (printer & audio) — owned here, applied live on cashier tills
+  const terminalSettings = useTerminalSettings();
+
+  // Local print bridge (direct USB/thermal output). Owner-only — cashiers never
+  // see this panel, and it applies live to every open till.
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ state: 'unknown' });
+  const [bridgePrinters, setBridgePrinters] = useState<
+    Array<{ name: string; port: string; isDefault: boolean; isUsb: boolean }>
+  >([]);
+  const [bridgeBusy, setBridgeBusy] = useState(false);
+  const [testPrintMsg, setTestPrintMsg] = useState<string | null>(null);
+
+  const refreshBridge = React.useCallback(async () => {
+    const status = await checkBridge();
+    setBridgeStatus(status);
+    if (status.state === 'online') {
+      try {
+        setBridgePrinters(await listBridgePrinters());
+      } catch {
+        setBridgePrinters([]);
+      }
+    } else {
+      setBridgePrinters([]);
+    }
+  }, []);
+
+  // Probe the bridge once when the settings panel comes into view.
+  useEffect(() => {
+    void refreshBridge();
+  }, [refreshBridge]);
+
+  const handleTestPrint = async () => {
+    setBridgeBusy(true);
+    setTestPrintMsg(null);
+    try {
+      const result = await sendTestPage();
+      if (result.ok) {
+        setTestPrintMsg(`Test page sent via ${result.transport} → ${result.target ?? 'printer'}`);
+      } else {
+        setTestPrintMsg(result.error ?? 'Test print failed');
+      }
+    } finally {
+      setBridgeBusy(false);
+    }
+  };
 
   // Customer modal
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
@@ -92,6 +169,37 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPhone, setStaffPhone] = useState('+233 ');
   const [staffRole, setStaffRole] = useState<'shop_owner' | 'cashier'>('cashier');
+  const [staffPassword, setStaffPassword] = useState('');
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
+  const [staffError, setStaffError] = useState('');
+  const [staffCreatedMsg, setStaffCreatedMsg] = useState('');
+
+  // Sales page filters — re-derived live as sales land.
+  // Remembered per shop so a round-trip to the till doesn't lose them; see
+  // salesViewFilters for why they are stored rather than held in component state.
+  const [salesView, setSalesView] = useState<SalesViewFilters>(() =>
+    loadSalesViewFilters(currentTenant.id)
+  );
+
+  // Re-read when the shop changes. Returning the previous object when nothing
+  // differs lets React bail out instead of re-rendering on every mount.
+  useEffect(() => {
+    setSalesView((prev) => {
+      const next = loadSalesViewFilters(currentTenant.id);
+      return prev.month === next.month && prev.cashier === next.cashier ? prev : next;
+    });
+  }, [currentTenant.id]);
+
+  const applySalesView = (patch: Partial<SalesViewFilters>) => {
+    const next = { ...salesView, ...patch };
+    setSalesView(next);
+    saveSalesViewFilters(currentTenant.id, next);
+  };
+
+  const salesMonth = salesView.month;
+  const salesCashier = salesView.cashier;
+  const setSalesMonth = (month: string) => applySalesView({ month });
+  const setSalesCashier = (cashier: string) => applySalesView({ cashier });
 
   // 1. Authoritative Dynamic Calculations for this shop
   const tenantSales = sales.filter((s) => s.tenant_id === currentTenant.id);
@@ -100,6 +208,7 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   const expenses = db.getExpenses(currentTenant.id);
   const staffMembers = db.getUsers(currentTenant.id);
   const movements = db.getInventoryMovements(currentTenant.id);
+  const shopCategories = db.getCategories(currentTenant.id);
 
   const totalSalesToday = tenantSales.reduce((acc, curr) => acc + curr.total_amount, 0);
   const totalOrdersCount = tenantSales.length;
@@ -110,6 +219,60 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
     (p) => p.stock_quantity <= p.min_stock_threshold
   );
   const totalExpensesAmount = expenses.reduce((acc, curr) => acc + curr.amount, 0);
+
+  // Month filter for the Sales & Invoices page.
+  // Offers the last 12 months (so a quiet month can still be inspected and shows an
+  // empty state) plus any older month that actually has sales. Always live.
+  const monthKeyOf = (sale: Sale) => {
+    const d = new Date(sale.created_at);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const availableSalesMonths = (() => {
+    const now = new Date();
+    const keys = new Set<string>();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      keys.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    tenantSales.forEach((s) => keys.add(monthKeyOf(s)));
+    return Array.from(keys).sort().reverse();
+  })();
+
+  const formatMonthLabel = (key: string) => {
+    const [year, month] = key.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString('en-GH', {
+      month: 'long',
+      year: 'numeric',
+    });
+  };
+
+  // Cashier filter for the Sales & Invoices page.
+  // Names come from this shop's own sales, so the list stays in step with who actually
+  // works the till. The currently selected cashier is always kept in the list so a
+  // filter never silently resets itself.
+  const availableSalesCashiers = (() => {
+    const names = new Set<string>();
+    tenantSales.forEach((s) => {
+      if (s.cashier_name) names.add(s.cashier_name);
+    });
+    if (salesCashier !== 'all') names.add(salesCashier);
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  })();
+
+  // Both filters compose: month first, then cashier.
+  const filteredTenantSales = tenantSales.filter(
+    (s) =>
+      (salesMonth === 'all' || monthKeyOf(s) === salesMonth) &&
+      (salesCashier === 'all' || s.cashier_name === salesCashier)
+  );
+  const filteredSalesTotal = filteredTenantSales.reduce(
+    (acc, curr) => acc + curr.total_amount,
+    0
+  );
+  const filteredRefundTotal = filteredTenantSales
+    .filter((s) => s.status === 'refunded')
+    .reduce((acc, curr) => acc + curr.total_amount, 0);
 
   // Group real sales dynamically by hour
   const hourlySalesMap: Record<string, number> = {
@@ -181,12 +344,43 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
     document.body.removeChild(link);
   };
 
-  // Stock adjustment handler
+  // Stock adjustment handler — records a typed, audited movement in the ledger
   const handleConfirmStockAdjust = (e: React.FormEvent) => {
     e.preventDefault();
     if (!showStockAdjustModal) return;
-    const delta = parseInt(stockAdjustQty, 10) || 0;
-    db.updateProductStock(showStockAdjustModal.id, delta, stockAdjustReason);
+    setStockAdjustError('');
+
+    if (!canAdjustStock(db.getCurrentUser(), currentTenant.id)) {
+      setStockAdjustError('Only the shop owner or authorized stock manager can adjust stock.');
+      return;
+    }
+
+    const rawQty = parseInt(stockAdjustQty, 10);
+    if (!Number.isFinite(rawQty) || rawQty === 0) {
+      setStockAdjustError('Enter a non-zero quantity.');
+      return;
+    }
+
+    const signedTypes: InventoryMovementType[] = ['adjustment'];
+    const quantity = signedTypes.includes(stockAdjustType) ? rawQty : Math.abs(rawQty);
+
+    const result = db.recordStockMovement({
+      tenant_id: currentTenant.id,
+      product_id: showStockAdjustModal.id,
+      type: stockAdjustType,
+      quantity,
+      unit_cost:
+        stockAdjustType === 'restock' && stockAdjustUnitCost.trim() !== ''
+          ? parseFloat(stockAdjustUnitCost)
+          : undefined,
+      reason: stockAdjustReason,
+      reference_type: stockAdjustType === 'restock' ? 'receipt' : 'adjustment',
+    });
+
+    if (!result.success) {
+      setStockAdjustError(result.message || 'Could not record the movement.');
+      return;
+    }
     setShowStockAdjustModal(null);
   };
 
@@ -221,20 +415,53 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
     setShowAddExpenseModal(false);
   };
 
-  // Create staff
+  // Create staff with an owner-created login password (saved + usable immediately)
   const handleCreateStaff = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!staffName.trim()) return;
-    db.addUser({
+    setStaffError('');
+
+    const name = staffName.trim();
+    if (!name) {
+      setStaffError('Enter the staff member’s full name.');
+      return;
+    }
+
+    if (staffPassword.length < 6) {
+      setStaffError('Create a password with at least 6 characters.');
+      return;
+    }
+
+    const email =
+      staffEmail.trim().toLowerCase() ||
+      `${name.toLowerCase().replace(/[^a-z0-9]+/g, '')}@${currentTenant.slug}.com`;
+
+    const duplicate = db
+      .getUsers()
+      .find((u) => u.email.toLowerCase() === email);
+    if (duplicate) {
+      setStaffError('That login email is already in use. Please use a different one.');
+      return;
+    }
+
+    const created = db.addUser({
       tenant_id: currentTenant.id,
       shop_name: currentTenant.name,
-      full_name: staffName.trim(),
-      email: staffEmail.trim() || `${staffName.toLowerCase().replace(/\s/g, '')}@${currentTenant.slug}.com`,
+      full_name: name,
+      email,
       phone: staffPhone.trim(),
       role: staffRole,
+      password: staffPassword,
       is_active: true,
     });
+
+    // Reset form and confirm instantly — the staff table updates in real time.
     setStaffName('');
+    setStaffEmail('');
+    setStaffPhone('+233 ');
+    setStaffRole('cashier');
+    setStaffPassword('');
+    setShowStaffPassword(false);
+    setStaffCreatedMsg(`${created.full_name} can now sign in with ${created.email}`);
     setShowAddStaffModal(false);
   };
 
@@ -249,12 +476,14 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   return (
     <div className="flex flex-col md:flex-row min-h-[calc(100vh-4rem)] bg-[#F5F7FA]">
       {/* Mobile Horizontal Navigation Header */}
-      <div className="md:hidden bg-[#102A4C] text-white p-2 flex items-center overflow-x-auto gap-1.5 border-b border-slate-700 w-full flex-shrink-0">
+      <div className="md:hidden sticky top-16 z-20 bg-[#102A4C] text-white p-2 flex items-center overflow-x-auto gap-1.5 border-b border-slate-700 w-full flex-shrink-0">
         {[
           { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
           { id: 'sales', label: 'Sales', icon: ShoppingCart, count: tenantSales.length },
           { id: 'inventory', label: 'Inventory', icon: Boxes, badge: lowStockProducts.length > 0 ? `${lowStockProducts.length} low` : undefined },
           { id: 'products', label: 'Products', icon: Package, count: tenantProducts.length },
+          { id: 'stockbook', label: 'Stock Book', icon: BookOpen },
+          { id: 'categories', label: 'Categories', icon: Tags, count: db.getCategories(currentTenant.id).length },
           { id: 'customers', label: 'Customers', icon: Users, count: customers.length },
           { id: 'staff', label: 'Staff', icon: UserCheck, count: staffMembers.length },
           { id: 'expenses', label: 'Expenses', icon: Receipt, count: expenses.length },
@@ -284,7 +513,7 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
       </div>
 
       {/* Sidebar matching bottom-left screenshot */}
-      <aside className="w-60 bg-[#102A4C] text-slate-300 flex-shrink-0 hidden md:flex flex-col border-r border-slate-800">
+      <aside className="w-60 bg-[#102A4C] text-slate-300 flex-shrink-0 hidden md:flex flex-col border-r border-slate-800 sticky top-16 self-start h-[calc(100vh-4rem)] overflow-y-auto">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-orange-500/20 text-[#F28C28] flex items-center justify-center font-bold text-xs uppercase">
@@ -305,6 +534,8 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
             { id: 'sales', label: 'Sales', icon: ShoppingCart, count: tenantSales.length },
             { id: 'inventory', label: 'Inventory', icon: Boxes, badge: lowStockProducts.length > 0 ? `${lowStockProducts.length} low` : undefined },
             { id: 'products', label: 'Products', icon: Package, count: tenantProducts.length },
+            { id: 'stockbook', label: 'Stock Book', icon: BookOpen },
+            { id: 'categories', label: 'Categories', icon: Tags, count: db.getCategories(currentTenant.id).length },
             { id: 'customers', label: 'Customers', icon: Users, count: customers.length },
             { id: 'staff', label: 'Staff', icon: UserCheck, count: staffMembers.length },
             { id: 'expenses', label: 'Expenses', icon: Receipt, count: expenses.length },
@@ -365,7 +596,13 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-black text-slate-900 tracking-tight capitalize">
-                {activeMenu === 'overview' ? 'Shop Owner Dashboard' : activeMenu}
+                {activeMenu === 'overview'
+                  ? 'Shop Owner Dashboard'
+                  : activeMenu === 'stockbook'
+                  ? 'Stock Book'
+                  : activeMenu === 'categories'
+                  ? 'Product Categories'
+                  : activeMenu}
               </h1>
               <span className="text-xs font-bold text-[#F28C28] bg-orange-50 border border-orange-200 px-2.5 py-0.5 rounded-full">
                 {currentTenant.name}
@@ -690,16 +927,68 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
         {/* 2. SALES PAGE */}
         {activeMenu === 'sales' && (
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div>
                 <h3 className="text-lg font-black text-slate-900">Store Sales & Invoices</h3>
                 <p className="text-xs text-slate-500">
                   Detailed register transactions with item breakdowns and refund capability
                 </p>
               </div>
-              <span className="text-xs font-bold text-slate-500">
-                {tenantSales.length} total orders ({formatGHS(totalSalesToday)})
-              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                  <Calendar className="w-4 h-4 text-slate-400" />
+                  <span className="sr-only">Filter sales by month</span>
+                  <select
+                    aria-label="Filter sales by month"
+                    value={salesMonth}
+                    onChange={(e) => setSalesMonth(e.target.value)}
+                    className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#F28C28]"
+                  >
+                    <option value="all">All Months</option>
+                    {availableSalesMonths.map((key) => (
+                      <option key={key} value={key}>
+                        {formatMonthLabel(key)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                  <UserCheck className="w-4 h-4 text-slate-400" />
+                  <span className="sr-only">Filter sales by cashier</span>
+                  <select
+                    aria-label="Filter sales by cashier"
+                    value={salesCashier}
+                    onChange={(e) => setSalesCashier(e.target.value)}
+                    className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#F28C28]"
+                  >
+                    <option value="all">All Cashiers</option>
+                    {availableSalesCashiers.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {(salesMonth !== 'all' || salesCashier !== 'all') && (
+                  <button
+                    // One call, not one per filter: each setter closes over the
+                    // same salesView, so two synchronous calls would let the
+                    // second discard the first.
+                    onClick={() => applySalesView({ month: 'all', cashier: 'all' })}
+                    className="flex items-center gap-1 text-[11px] font-bold text-[#F28C28] hover:underline"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset</span>
+                  </button>
+                )}
+                <span className="text-xs font-bold text-slate-500">
+                  {filteredTenantSales.length}{' '}
+                  {salesMonth === 'all' && salesCashier === 'all'
+                    ? 'total orders'
+                    : `order${filteredTenantSales.length === 1 ? '' : 's'}`} (
+                  {formatGHS(filteredSalesTotal)})
+                </span>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -717,7 +1006,21 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {tenantSales.map((s) => (
+                  {filteredTenantSales.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-12 text-center">
+                        <Receipt className="w-7 h-7 text-slate-300 mx-auto mb-2" />
+                        <p className="text-xs font-bold text-slate-500">
+                          No sales recorded for {salesCashier !== 'all' ? salesCashier : 'this shop'}
+                          {salesMonth !== 'all' ? ` in ${formatMonthLabel(salesMonth)}` : ''}
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          New till sales appear here instantly.
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+                  {filteredTenantSales.map((s) => (
                     <tr key={s.id} className="hover:bg-slate-50/70">
                       <td className="py-3 font-bold text-slate-900">{s.invoice_number}</td>
                       <td className="py-3 text-slate-500">{new Date(s.created_at).toLocaleString('en-GH')}</td>
@@ -755,6 +1058,30 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                 </tbody>
               </table>
             </div>
+
+            {/* Summary for the selected period (live) */}
+            {filteredTenantSales.length > 0 && (
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Orders</p>
+                  <p className="text-sm font-black text-slate-900 mt-0.5">{filteredTenantSales.length}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Gross Sales</p>
+                  <p className="text-sm font-black text-slate-900 mt-0.5">{formatGHS(filteredSalesTotal)}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-200">
+                  <p className="text-[10px] font-bold text-rose-400 uppercase tracking-wide">Refunds</p>
+                  <p className="text-sm font-black text-rose-700 mt-0.5">{formatGHS(filteredRefundTotal)}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-emerald-50/60 border border-emerald-200">
+                  <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wide">Net Sales</p>
+                  <p className="text-sm font-black text-emerald-700 mt-0.5">
+                    {formatGHS(Math.max(0, filteredSalesTotal - filteredRefundTotal))}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -777,15 +1104,22 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                     <tr className="border-b border-slate-100 text-slate-400 font-semibold">
                       <th className="pb-3">Product</th>
                       <th className="pb-3">Barcode</th>
+                      <th className="pb-3">Category</th>
                       <th className="pb-3">Available Stock</th>
                       <th className="pb-3">Min Threshold</th>
-                      <th className="pb-3">Stock Valuation</th>
+                      <th className="pb-3">Avg Cost (WAC)</th>
+                      <th className="pb-3">Est. Stock Days</th>
+                      <th className="pb-3">Stock Valuation (at cost)</th>
                       <th className="pb-3 text-right">Adjustment</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {tenantProducts.map((p) => {
                       const isLow = p.stock_quantity <= p.min_stock_threshold;
+                      const est = estimateStockDays(
+                        p,
+                        movements.filter((m) => m.product_id === p.id)
+                      );
                       return (
                         <tr key={p.id} className="hover:bg-slate-50/70">
                           <td className="py-3 font-bold text-slate-900 flex items-center gap-2.5">
@@ -797,6 +1131,11 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                             <span>{p.name}</span>
                           </td>
                           <td className="py-3 font-mono text-slate-600">{p.barcode}</td>
+                          <td className="py-3 text-slate-600">
+                            {p.category_name || (
+                              <span className="text-slate-400">Uncategorised</span>
+                            )}
+                          </td>
                           <td className="py-3 font-extrabold text-slate-900">
                             <span className={isLow ? 'text-rose-600' : 'text-emerald-700'}>
                               {p.stock_quantity} {p.unit}s
@@ -809,11 +1148,48 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                           </td>
                           <td className="py-3 text-slate-500">{p.min_stock_threshold} {p.unit}s</td>
                           <td className="py-3 font-semibold text-slate-800">
-                            {formatGHS(p.cost_price * p.stock_quantity)}
+                            {formatGHS(effectiveUnitCost(p))}
+                          </td>
+                          <td className="py-3">
+                            {est.available ? (
+                              <span
+                                className={
+                                  est.days !== null && est.days < 7
+                                    ? 'text-rose-600 font-bold'
+                                    : 'text-slate-700 font-semibold'
+                                }
+                              >
+                                {est.days} d
+                                {est.preliminary && (
+                                  <span className="ml-1 px-1 py-0.5 rounded bg-amber-100 text-amber-700 text-[9px] font-bold">
+                                    prelim
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <span
+                                className="text-slate-400"
+                                title={est.message || 'No sales history'}
+                              >
+                                —
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 font-semibold text-slate-800">
+                            {formatGHS(effectiveUnitCost(p) * p.stock_quantity)}
                           </td>
                           <td className="py-3 text-right">
                             <button
-                              onClick={() => setShowStockAdjustModal(p)}
+                              onClick={() => {
+                                setStockAdjustType('restock');
+                                setStockAdjustQty('10');
+                                setStockAdjustReason('Restock shipment from supplier');
+                                setStockAdjustUnitCost(
+                                  String(effectiveUnitCost(p))
+                                );
+                                setStockAdjustError('');
+                                setShowStockAdjustModal(p);
+                              }}
                               className="px-3 py-1 rounded-lg border border-slate-300 text-slate-700 hover:bg-orange-50 hover:border-orange-500 font-bold transition"
                             >
                               Adjust Stock
@@ -829,7 +1205,12 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
 
             {/* Stock Movement Ledger History */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-900 mb-3">Audit Stock Movement Ledger</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-900">Audit Stock Movement Ledger</h3>
+                <span className="text-[10px] text-slate-400 font-semibold">
+                  Append-only history — corrections are recorded as reversals, never overwritten
+                </span>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead>
@@ -837,32 +1218,82 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                       <th className="pb-2">Time</th>
                       <th className="pb-2">Product</th>
                       <th className="pb-2">Type</th>
-                      <th className="pb-2">Quantity</th>
+                      <th className="pb-2 text-right">Qty Δ</th>
+                      <th className="pb-2 text-right">Balance After</th>
+                      <th className="pb-2 text-right">Unit Cost</th>
                       <th className="pb-2">Reason</th>
+                      <th className="pb-2">By</th>
+                      <th className="pb-2 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {movements.slice(0, 8).map((m) => (
-                      <tr key={m.id} className="hover:bg-slate-50/70">
-                        <td className="py-2.5 text-slate-500">{new Date(m.created_at).toLocaleTimeString()}</td>
-                        <td className="py-2.5 font-bold text-slate-800">{m.product_name}</td>
-                        <td className="py-2.5 uppercase font-bold text-[10px]">
-                          <span
-                            className={`px-2 py-0.5 rounded ${
-                              m.type === 'sale'
-                                ? 'bg-blue-100 text-blue-700'
-                                : m.type === 'refund'
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'bg-emerald-100 text-emerald-700'
+                    {movements.slice(0, 20).map((m) => {
+                      const delta = movementDelta(m);
+                      return (
+                        <tr key={m.id} className="hover:bg-slate-50/70">
+                          <td className="py-2.5 text-slate-500">{new Date(m.created_at).toLocaleString()}</td>
+                          <td className="py-2.5 font-bold text-slate-800">{m.product_name}</td>
+                          <td className="py-2.5 uppercase font-bold text-[10px]">
+                            <span
+                              className={`px-2 py-0.5 rounded ${
+                                m.type === 'sale'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : m.type === 'refund' || m.type === 'customer_return'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : m.type === 'damage' || m.type === 'expired' || m.type === 'supplier_return'
+                                  ? 'bg-rose-100 text-rose-700'
+                                  : m.type === 'adjustment' || m.type === 'reversal'
+                                  ? 'bg-slate-200 text-slate-700'
+                                  : 'bg-emerald-100 text-emerald-700'
+                              }`}
+                            >
+                              {MOVEMENT_TYPE_LABELS[m.type] || m.type}
+                            </span>
+                          </td>
+                          <td
+                            className={`py-2.5 text-right font-extrabold ${
+                              delta >= 0 ? 'text-emerald-700' : 'text-rose-600'
                             }`}
                           >
-                            {m.type}
-                          </span>
+                            {delta >= 0 ? `+${delta}` : delta}
+                          </td>
+                          <td className="py-2.5 text-right font-bold text-slate-900">
+                            {m.balance_after ?? '—'}
+                          </td>
+                          <td className="py-2.5 text-right text-slate-600">
+                            {m.unit_cost !== undefined ? formatGHS(m.unit_cost) : '—'}
+                          </td>
+                          <td className="py-2.5 text-slate-500">{m.reason || 'Inventory action'}</td>
+                          <td className="py-2.5 text-slate-500">{m.created_by_name || '—'}</td>
+                          <td className="py-2.5 text-right">
+                            {m.type !== 'reversal' && !movements.some((r) => r.reversal_of === m.id) && (
+                              <button
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      `Reverse this ${MOVEMENT_TYPE_LABELS[m.type] || m.type} movement of ${m.quantity} for ${m.product_name}? A signed reversal entry will be appended — history is preserved.`
+                                    )
+                                  ) {
+                                    const res = db.reverseStockMovement(m.id, 'Authorized correction via stock book');
+                                    if (!res.success) alert(res.message || 'Could not reverse movement.');
+                                  }
+                                }}
+                                className="px-2 py-0.5 rounded bg-slate-100 hover:bg-amber-100 text-amber-700 font-bold text-[10px] transition"
+                              >
+                                Reverse
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {movements.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="py-6 text-center text-slate-400">
+                          No stock movements recorded yet.
                         </td>
-                        <td className="py-2.5 font-extrabold text-slate-900">{m.quantity}</td>
-                        <td className="py-2.5 text-slate-500">{m.reason || 'Inventory action'}</td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -915,7 +1346,36 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                         </div>
                       </td>
                       <td className="py-3 font-mono text-slate-600">{p.barcode}</td>
-                      <td className="py-3 text-slate-600">{p.category_name}</td>
+                      <td className="py-3">
+                        <select
+                          value={p.category_id || ''}
+                          onChange={(e) => {
+                            const catId = e.target.value;
+                            const ok = db.updateProduct(
+                              p.id,
+                              catId
+                                ? {
+                                    category_id: catId,
+                                    category_name: shopCategories.find((c) => c.id === catId)?.name,
+                                  }
+                                : { category_id: undefined, category_name: undefined }
+                            );
+                            if (!ok) {
+                              alert('Could not reassign — the category is inactive or not in this shop.');
+                            }
+                          }}
+                          className="p-1.5 bg-slate-50 border border-slate-300 rounded-lg text-slate-700 font-medium text-[11px] focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
+                        >
+                          <option value="">Uncategorised</option>
+                          {shopCategories
+                            .filter((c) => c.is_active)
+                            .map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.parent_id ? `↳ ${c.name}` : c.name}
+                              </option>
+                            ))}
+                        </select>
+                      </td>
                       <td className="py-3 text-slate-500 font-medium">{formatGHS(p.cost_price)}</td>
                       <td className="py-3 font-black text-slate-900">{formatGHS(p.selling_price)}</td>
                       <td className="py-3 font-bold text-slate-800">{p.stock_quantity}</td>
@@ -948,6 +1408,16 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
               </table>
             </div>
           </div>
+        )}
+
+        {/* 4b. STOCK BOOK PAGE — daily opening/received/sales/closing from the live ledger */}
+        {activeMenu === 'stockbook' && (
+          <StockBookView currentTenant={currentTenant} products={tenantProducts} />
+        )}
+
+        {/* 4c. CATEGORY MANAGEMENT — shop-admin managed product categories */}
+        {activeMenu === 'categories' && (
+          <CategoryManager currentTenant={currentTenant} products={tenantProducts} />
         )}
 
         {/* 5. CUSTOMERS PAGE */}
@@ -1012,6 +1482,19 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                 <span>Add Cashier</span>
               </button>
             </div>
+
+            {/* Real-time confirmation after a cashier is created */}
+            {staffCreatedMsg && (
+              <div className="mb-4 flex items-center justify-between gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 text-xs font-semibold">
+                <span>{staffCreatedMsg} — password set, ready to sign in.</span>
+                <button
+                  onClick={() => setStaffCreatedMsg('')}
+                  className="text-emerald-600 hover:text-emerald-900 font-bold"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -1154,9 +1637,10 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
 
         {/* 9. SETTINGS PAGE */}
         {activeMenu === 'settings' && (
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm max-w-2xl">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-5xl">
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
             <h3 className="text-lg font-black text-slate-900 mb-1">Supermarket Store Settings</h3>
-            <p className="text-xs text-slate-500 mb-6">Manage branch profile, tax rates, and thermal receipt copy</p>
+            <p className="text-xs text-slate-500 mb-6">Manage branch profile, receipt copy, and terminal printer &amp; audio settings</p>
 
             <div className="space-y-4 text-xs font-medium text-slate-700">
               <div>
@@ -1206,6 +1690,252 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Terminal Settings — Printer & Audio (owner-only, live on cashier tills) */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-2 mb-1">
+              <Printer className="w-5 h-5 text-[#F28C28]" />
+              <h3 className="text-lg font-black text-slate-900">Terminal Settings — Printer &amp; Audio</h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-6">
+              Applies to every open cashier till instantly. Cashiers cannot change these settings.
+            </p>
+
+            <div className="space-y-5 text-xs font-medium text-slate-700">
+              {/* Thermal paper width */}
+              <div>
+                <label className="block font-bold text-slate-800 mb-1.5">Thermal Receipt Paper Width</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => updateTerminalSettings({ printer_paper_size: '80mm' })}
+                    className={`p-3 rounded-xl border text-left transition ${
+                      terminalSettings.printer_paper_size === '80mm'
+                        ? 'border-orange-500 bg-orange-50/50 text-[#F28C28]'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <p className="font-extrabold text-sm">80mm Wide (Standard Supermarket)</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">High-speed thermal roll</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => updateTerminalSettings({ printer_paper_size: '58mm' })}
+                    className={`p-3 rounded-xl border text-left transition ${
+                      terminalSettings.printer_paper_size === '58mm'
+                        ? 'border-orange-500 bg-orange-50/50 text-[#F28C28]'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <p className="font-extrabold text-sm">58mm Compact</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Portable Bluetooth till</p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Scanner beep */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-4">
+                <div className="flex items-start gap-2.5">
+                  <Volume2 className="w-4 h-4 mt-0.5 text-[#F28C28] flex-shrink-0" />
+                  <div>
+                    <h4 className="font-bold text-slate-800">Barcode Scanner Beep</h4>
+                    <p className="text-[11px] text-slate-500">
+                      Audio chime synthesized on each valid item scan
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => playScannerBeep()}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition"
+                  >
+                    Test
+                  </button>
+                  <input
+                    type="checkbox"
+                    checked={terminalSettings.beep_enabled}
+                    onChange={(e) => updateTerminalSettings({ beep_enabled: e.target.checked })}
+                    className="w-5 h-5 accent-[#F28C28] rounded cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* Auto print receipts */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="font-bold text-slate-800">Auto-Open Receipt on Checkout</h4>
+                  <p className="text-[11px] text-slate-500">
+                    Instantly launches printable thermal receipt after sale confirmation
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={terminalSettings.auto_print_receipt}
+                  onChange={(e) => updateTerminalSettings({ auto_print_receipt: e.target.checked })}
+                  className="w-5 h-5 accent-[#F28C28] rounded cursor-pointer flex-shrink-0"
+                />
+              </div>
+
+              {/* Receipt output path — browser dialog vs. direct thermal printer */}
+              <div className="pt-3 border-t border-slate-100">
+                <label className="block font-bold text-slate-800 mb-1.5">Receipt Output</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {(
+                    [
+                      {
+                        value: 'auto' as const,
+                        title: 'Automatic',
+                        note: 'Thermal printer if the bridge is running, otherwise the print dialog',
+                      },
+                      {
+                        value: 'bridge' as const,
+                        title: 'Thermal Printer Only',
+                        note: 'Always prints to hardware; never falls back to the browser',
+                      },
+                      {
+                        value: 'browser' as const,
+                        title: 'Browser Print Dialog',
+                        note: 'Always opens the browser print window',
+                      },
+                    ]
+                  ).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => updateTerminalSettings({ print_method: option.value })}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        terminalSettings.print_method === option.value
+                          ? 'border-orange-500 bg-orange-50/50 text-[#F28C28]'
+                          : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <p className="font-extrabold text-sm">{option.title}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">{option.note}</p>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Print bridge connection */}
+                <div className="mt-4 rounded-xl border border-slate-200 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-start gap-2.5">
+                      <Usb className="w-4 h-4 mt-0.5 text-[#F28C28] flex-shrink-0" />
+                      <div>
+                        <h4 className="font-bold text-slate-800">Local Print Bridge</h4>
+                        <p className="text-[11px] text-slate-500">
+                          Helper service running on this till (
+                          <span className="font-mono">{bridgeUrl()}</span>) that sends receipt
+                          bytes straight to the thermal printer.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void refreshBridge()}
+                      disabled={bridgeBusy}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition flex items-center gap-1.5 flex-shrink-0 disabled:opacity-60"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Refresh
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[11px] font-bold flex-wrap">
+                    {bridgeStatus.state === 'online' ? (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span className="text-emerald-700">Connected</span>
+                        <span className="text-slate-500 font-medium">
+                          {bridgeStatus.printer
+                            ? `→ ${bridgeStatus.printer}`
+                            : '→ printer auto-selected'}
+                        </span>
+                      </>
+                    ) : bridgeStatus.state === 'offline' ? (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        <span className="text-amber-700">Not running</span>
+                        <span className="text-slate-500 font-medium">
+                          start it with <span className="font-mono">npm run print-bridge</span>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse" />
+                        <span className="text-slate-500 font-medium">Checking…</span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Printer picker — only meaningful once the bridge is up */}
+                  {bridgePrinters.length > 0 && (
+                    <div>
+                      <label className="block font-bold text-slate-800 mb-1.5">
+                        Thermal Printer
+                      </label>
+                      <select
+                        aria-label="Thermal Printer"
+                        value={terminalSettings.bridge_printer}
+                        onChange={(e) =>
+                          updateTerminalSettings({ bridge_printer: e.target.value })
+                        }
+                        className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-800 text-xs"
+                      >
+                        <option value="">Auto-select (USB printer if found, else default)</option>
+                        {bridgePrinters.map((printer) => (
+                          <option key={printer.name} value={printer.name}>
+                            {printer.name}
+                            {printer.isUsb ? ' (USB)' : ''}
+                            {printer.isDefault ? ' — default' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void handleTestPrint()}
+                      disabled={bridgeBusy || bridgeStatus.state !== 'online'}
+                      className="px-3 py-1.5 rounded-lg bg-[#F28C28] hover:bg-orange-600 text-white text-[11px] font-black transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {bridgeBusy ? 'Sending…' : 'Test Print'}
+                    </button>
+                    {testPrintMsg && (
+                      <span className="text-[11px] text-slate-600 font-medium">{testPrintMsg}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Live status + till metadata */}
+              <div className="pt-4 border-t border-slate-100 space-y-2 text-slate-600">
+                <div className="flex justify-between">
+                  <span className="font-semibold">Sync Status:</span>
+                  <span className="font-bold text-emerald-600 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Live on all open tills
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-semibold">Till Device ID:</span>
+                  <span className="font-mono text-slate-800">{terminalSettings.till_id}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-semibold">Assigned Supermarket:</span>
+                  <span className="font-bold text-slate-900">{currentTenant.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-semibold">Local Currency:</span>
+                  <span className="font-bold text-slate-900">{currentTenant.currency} (GH₵)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          </div>
         )}
 
         {/* Stock Adjustment Modal */}
@@ -1215,6 +1945,7 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
               <h3 className="text-base font-black text-slate-900 mb-1">Adjust Inventory Stock</h3>
               <p className="text-xs text-slate-500 mb-4">
                 Updating stock for <strong className="text-slate-900">{showStockAdjustModal.name}</strong>
+                {' '}— recorded permanently in the stock movement ledger
               </p>
 
               <form onSubmit={handleConfirmStockAdjust} className="space-y-3 text-xs font-medium text-slate-700">
@@ -1223,35 +1954,90 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                   <input
                     type="text"
                     disabled
-                    value={`${showStockAdjustModal.stock_quantity} ${showStockAdjustModal.unit}s`}
+                    value={`${showStockAdjustModal.stock_quantity} ${showStockAdjustModal.unit}s (avg cost ${formatGHS(
+                      effectiveUnitCost(showStockAdjustModal)
+                    )})`}
                     className="w-full p-2.5 bg-slate-100 border border-slate-300 rounded-xl font-bold text-slate-800"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1">Quantity to Add (or negative to remove) *</label>
+                  <label className="block font-bold mb-1">Movement Type *</label>
+                  <select
+                    value={stockAdjustType}
+                    onChange={(e) => {
+                      const t = e.target.value as InventoryMovementType;
+                      setStockAdjustType(t);
+                      setStockAdjustError('');
+                      if (t === 'restock') setStockAdjustReason('Supplier receipt / restock');
+                      else if (t === 'customer_return' || t === 'refund') setStockAdjustReason('Customer return to sellable stock');
+                      else if (t === 'damage') setStockAdjustReason('Damaged stock write-off');
+                      else if (t === 'expired') setStockAdjustReason('Expired stock write-off');
+                      else if (t === 'supplier_return') setStockAdjustReason('Returned to supplier');
+                      else if (t === 'transfer_in') setStockAdjustReason('Transfer received from another branch');
+                      else if (t === 'transfer_out') setStockAdjustReason('Transfer sent to another branch');
+                      else setStockAdjustReason('Physical stock count correction');
+                    }}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
+                  >
+                    <option value="restock">Supplier Receipt (stock in)</option>
+                    <option value="customer_return">Customer Return (stock in)</option>
+                    <option value="damage">Damaged (stock out)</option>
+                    <option value="expired">Expired (stock out)</option>
+                    <option value="supplier_return">Supplier Return (stock out)</option>
+                    <option value="transfer_in">Transfer In (stock in)</option>
+                    <option value="transfer_out">Transfer Out (stock out)</option>
+                    <option value="adjustment">Stock-count Adjustment (signed)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">
+                    {stockAdjustType === 'adjustment'
+                      ? 'Quantity Change (+ add / − remove) *'
+                      : 'Quantity *'}
+                  </label>
                   <input
                     type="number"
                     required
+                    step="1"
                     value={stockAdjustQty}
                     onChange={(e) => setStockAdjustQty(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-black text-slate-900 focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
                   />
                 </div>
 
+                {stockAdjustType === 'restock' && (
+                  <div>
+                    <label className="block font-bold mb-1">
+                      Purchase Unit Cost (GH₵ — updates weighted-average cost)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={stockAdjustUnitCost}
+                      onChange={(e) => setStockAdjustUnitCost(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
+                    />
+                  </div>
+                )}
+
                 <div>
-                  <label className="block font-bold mb-1">Adjustment Reason</label>
-                  <select
+                  <label className="block font-bold mb-1">Reason</label>
+                  <input
+                    type="text"
                     value={stockAdjustReason}
                     onChange={(e) => setStockAdjustReason(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
-                  >
-                    <option value="Restock shipment from supplier">Restock shipment from supplier</option>
-                    <option value="Physical till stock audit count">Physical till stock audit count</option>
-                    <option value="Damage / Expiry disposal">Damage / Expiry disposal</option>
-                    <option value="Customer return / restock">Customer return / restock</option>
-                  </select>
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-900 focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
+                  />
                 </div>
+
+                {stockAdjustError && (
+                  <p className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-[11px] font-bold">
+                    {stockAdjustError}
+                  </p>
+                )}
 
                 <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
                   <button
@@ -1423,6 +2209,21 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                 </div>
 
                 <div>
+                  <label className="block font-bold mb-1">Login Email</label>
+                  <input
+                    type="email"
+                    placeholder={`auto: ${staffName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '') || 'cashiername'}@${currentTenant.slug}.com`}
+                    value={staffEmail}
+                    onChange={(e) => {
+                      setStaffEmail(e.target.value);
+                      if (staffError) setStaffError('');
+                    }}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium text-slate-900 focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Leave blank to generate one from the staff name.</p>
+                </div>
+
+                <div>
                   <label className="block font-bold mb-1">Phone</label>
                   <input
                     type="text"
@@ -1430,6 +2231,36 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                     onChange={(e) => setStaffPhone(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium text-slate-900 focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
                   />
+                </div>
+
+                {/* Owner-created password for the cashier login */}
+                <div>
+                  <label className="block font-bold mb-1">Create Password *</label>
+                  <div className="relative">
+                    <input
+                      type={showStaffPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      placeholder="Minimum 6 characters"
+                      value={staffPassword}
+                      onChange={(e) => {
+                        setStaffPassword(e.target.value);
+                        if (staffError) setStaffError('');
+                      }}
+                      className="w-full p-2.5 pr-10 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-900 focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowStaffPassword((v) => !v)}
+                      aria-label={showStaffPassword ? 'Hide password' : 'Show password'}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition"
+                    >
+                      {showStaffPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    The cashier signs in with this email and password.
+                  </p>
                 </div>
 
                 <div>
@@ -1444,10 +2275,20 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                   </select>
                 </div>
 
+                {/* Inline validation error — no alerts, no thrown errors */}
+                {staffError && (
+                  <p className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-[11px] font-bold">
+                    {staffError}
+                  </p>
+                )}
+
                 <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
                   <button
                     type="button"
-                    onClick={() => setShowAddStaffModal(false)}
+                    onClick={() => {
+                      setStaffError('');
+                      setShowAddStaffModal(false);
+                    }}
                     className="px-4 py-2 border border-slate-300 text-slate-700 font-bold hover:bg-slate-100 rounded-xl transition"
                   >
                     Cancel

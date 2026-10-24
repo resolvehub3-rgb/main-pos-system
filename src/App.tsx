@@ -21,7 +21,8 @@ export default function App() {
   const [, setTick] = useState<number>(0);
 
   // Modals state
-  const [activeReceiptSale, setActiveReceiptSale] = useState<Sale | null>(null);
+  // `autoPrint` = silent post-checkout print (no modal shown); false for reprints
+  const [activeReceipt, setActiveReceipt] = useState<{ sale: Sale; autoPrint: boolean } | null>(null);
   const [showCustomerDisplay, setShowCustomerDisplay] = useState<boolean>(false);
   const [showAddProductModal, setShowAddProductModal] = useState<boolean>(false);
   const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
@@ -139,7 +140,11 @@ export default function App() {
 
       {/* Owner previewing POS indicator banner */}
       {currentUser.role === 'shop_owner' && shopOwnerViewingPOS && (
-        <div className="bg-[#102A4C] text-orange-200 px-4 py-2 border-b border-orange-500/30 flex items-center justify-between text-xs font-semibold">
+        // Sticky at the navbar's height so scrolling the till can't slide it
+        // underneath: the button used to end up covered and unclickable after
+        // only a few pixels of scroll. z-30 keeps it below the navbar (z-40),
+        // so it tucks in beneath rather than overlapping it.
+        <div className="sticky top-16 z-30 bg-[#102A4C] text-orange-200 px-4 py-2 border-b border-orange-500/30 flex items-center justify-between text-xs font-semibold">
           <div className="flex items-center gap-2">
             <Store className="w-4 h-4 text-[#F28C28]" />
             <span>Store Owner Till Testing Mode &bull; {currentTenant.name}</span>
@@ -172,7 +177,9 @@ export default function App() {
               products={products.filter((p) => p.tenant_id === currentTenant.id)}
               activeShift={activeShift}
               onCompleteSale={handleCompleteSale}
-              onPrintLastReceipt={(sale) => setActiveReceiptSale(sale)}
+              onPrintLastReceipt={(sale, opts) =>
+                setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
+              }
               onOpenCustomerDisplay={() => setShowCustomerDisplay(true)}
               cart={cart}
               setCart={setCart}
@@ -194,7 +201,9 @@ export default function App() {
             products={products.filter((p) => p.tenant_id === currentTenant.id)}
             activeShift={activeShift}
             onCompleteSale={handleCompleteSale}
-            onPrintLastReceipt={(sale) => setActiveReceiptSale(sale)}
+            onPrintLastReceipt={(sale, opts) =>
+              setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
+            }
             onOpenCustomerDisplay={() => setShowCustomerDisplay(true)}
             cart={cart}
             setCart={setCart}
@@ -202,12 +211,13 @@ export default function App() {
         )}
       </div>
 
-      {/* Printable Thermal Receipt Modal */}
-      {activeReceiptSale && (
+      {/* Printable Thermal Receipt */}
+      {activeReceipt && (
         <ReceiptModal
-          sale={activeReceiptSale}
+          sale={activeReceipt.sale}
           tenant={currentTenant}
-          onClose={() => setActiveReceiptSale(null)}
+          autoPrint={activeReceipt.autoPrint}
+          onClose={() => setActiveReceipt(null)}
         />
       )}
 

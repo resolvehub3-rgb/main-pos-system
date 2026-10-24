@@ -16,7 +16,6 @@ import {
   ShoppingBag,
   Package,
   Boxes,
-  Settings,
   DollarSign,
   AlertTriangle,
   ArrowDownLeft,
@@ -32,6 +31,8 @@ import {
 import confetti from 'canvas-confetti';
 import { formatGHS, calculateCartTotals, calculateCashChange } from '../lib/money';
 import { playScannerBeep, playSaleChime } from '../lib/sound';
+import { useTerminalSettings } from '../lib/terminalSettings';
+import { ReceiptPrinterModal } from './ReceiptPrinterModal';
 import { Product, CartItem, Sale, Tenant, CashRegisterShift, ParkedCart } from '../types';
 import { db } from '../lib/supabaseClient';
 
@@ -44,7 +45,7 @@ interface CashierPOSProps {
     payment_details?: Sale['payment_details'];
     items: { productId: string; quantity: number; discountPercent?: number }[];
   }) => Sale;
-  onPrintLastReceipt: (sale: Sale) => void;
+  onPrintLastReceipt: (sale: Sale, opts?: { autoPrint?: boolean }) => void;
   onOpenCustomerDisplay: () => void;
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
@@ -61,7 +62,7 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   setCart,
 }) => {
   // Navigation Tabs for Cashier
-  const [activeTab, setActiveTab] = useState<'pos' | 'history' | 'checker' | 'shift' | 'settings'>('pos');
+  const [activeTab, setActiveTab] = useState<'pos' | 'history' | 'checker' | 'shift'>('pos');
 
   // POS State
   const [searchQuery, setSearchQuery] = useState('');
@@ -103,27 +104,30 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   const [checkerQuery, setCheckerQuery] = useState('');
   const [checkedProduct, setCheckedProduct] = useState<Product | null>(null);
 
-  // Terminal preferences
-  const [printerPaperSize, setPrinterPaperSize] = useState<'58mm' | '80mm'>('80mm');
-  const [beepEnabled, setBeepEnabled] = useState(true);
-  const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
+  // Terminal preferences are owned by the Shop Owner dashboard and read live here.
+  const terminalSettings = useTerminalSettings();
+  const beepEnabled = terminalSettings.beep_enabled;
+  const autoPrintEnabled = terminalSettings.auto_print_receipt;
+
+  // Sale shown in the automatic animated receipt-printing display
+  const [printingSale, setPrintingSale] = useState<Sale | null>(null);
 
   // Scanner autofocus input ref
   const searchInputRef = useRef<HTMLInputElement>(null);
   const checkerInputRef = useRef<HTMLInputElement>(null);
 
-  // Categories list
-  const categories = [
-    'All',
-    'Noodles & Grains',
-    'Beverages',
-    'Canned & Spices',
-    'Dairy & Spreads',
-    'Bakery',
-    'Baking & Pantry',
-    'Cooking Essentials',
-    'Snacks & Biscuits',
-  ];
+  // Categories list — derived live from the shop's managed categories
+  // (cashiers can FILTER by category but cannot create or edit categories)
+  const categories = React.useMemo(() => {
+    const names = new Set<string>();
+    for (const c of db.getCategories(currentTenant.id, { activeOnly: true })) {
+      names.add(c.name);
+    }
+    for (const p of products) {
+      if (p.category_name) names.add(p.category_name);
+    }
+    return ['All', ...Array.from(names).sort((a, b) => a.localeCompare(b))];
+  }, [currentTenant.id, products]);
 
   // Dynamic calculations from DB
   const sales = db.getSales(currentTenant.id);
@@ -294,8 +298,13 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
       setActivePaymentModal(null);
       setCashTendered(0);
 
-      // Open printable receipt automatically if autoPrint is on
+      // Animated printing display: it prints and dismisses itself automatically,
+      // so the cashier never has to click Done or Print Thermal.
+      // Owner preference honoured: with auto-print off, the receipt preview is
+      // shown instead so the cashier can decide to print or not.
       if (autoPrintEnabled) {
+        setPrintingSale(sale);
+      } else {
         onPrintLastReceipt(sale);
       }
     } catch (err: unknown) {
@@ -364,7 +373,6 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
           { id: 'history', label: 'Sales History', icon: Clock, count: sales.length },
           { id: 'checker', label: 'Price Checker', icon: Barcode },
           { id: 'shift', label: 'Cash Drawer', icon: DollarSign },
-          { id: 'settings', label: 'Terminal', icon: Settings },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -418,7 +426,6 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
               },
               { id: 'checker', label: 'Price Checker', icon: Barcode, desc: 'Barcode Scan' },
               { id: 'shift', label: 'Shift & Cash Drawer', icon: DollarSign, desc: 'Float & Totals' },
-              { id: 'settings', label: 'Terminal Settings', icon: Settings, desc: 'Printer & Audio' },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -481,6 +488,12 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                 Shift Open • Ready
               </p>
             </div>
+          </div>
+
+          {/* Printer & audio are configured by the shop owner only */}
+          <div className="flex items-center gap-2 pt-1.5 border-t border-slate-800 text-[10px] text-slate-400">
+            <Printer className="w-3.5 h-3.5 text-slate-500" />
+            <span>Printer &amp; audio set by the store owner</span>
           </div>
         </div>
       </aside>
@@ -1134,106 +1147,17 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
         </section>
       )}
 
-      {/* ========================================================================= */}
-      {/* 5. REGISTER & HARDWARE SETTINGS VIEW */}
-      {/* ========================================================================= */}
-      {activeTab === 'settings' && (
-        <section className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-slate-50">
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <h2 className="text-lg font-black text-slate-900 mb-1">
-                Cashier Till & Hardware Settings
-              </h2>
-              <p className="text-xs text-slate-500 mb-6">
-                Configure receipt printer size, audio feedback, and barcode reader preferences
-              </p>
+      {/* Terminal & hardware settings now live in the Shop Owner dashboard — cashiers cannot change them. */}
 
-              <div className="space-y-5 text-xs">
-                {/* Paper Width */}
-                <div>
-                  <label className="block font-bold text-slate-800 mb-1.5">
-                    Thermal Receipt Paper Width
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setPrinterPaperSize('80mm')}
-                      className={`p-3 rounded-xl border text-left transition ${
-                        printerPaperSize === '80mm'
-                          ? 'border-orange-500 bg-orange-50/50 text-[#F28C28]'
-                          : 'border-slate-200 text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <p className="font-extrabold text-sm">80mm Wide (Standard Supermarket)</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">High-speed thermal roll</p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setPrinterPaperSize('58mm')}
-                      className={`p-3 rounded-xl border text-left transition ${
-                        printerPaperSize === '58mm'
-                          ? 'border-orange-500 bg-orange-50/50 text-[#F28C28]'
-                          : 'border-slate-200 text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <p className="font-extrabold text-sm">58mm Compact</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">Portable Bluetooth till</p>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Sound & Audio Feedback */}
-                <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-slate-800">Barcode Scanner Beep</h4>
-                    <p className="text-[11px] text-slate-500">
-                      Audio chime synthesized on each valid item scan
-                    </p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={beepEnabled}
-                    onChange={(e) => setBeepEnabled(e.target.checked)}
-                    className="w-5 h-5 accent-[#F28C28] rounded cursor-pointer"
-                  />
-                </div>
-
-                {/* Auto Print Receipts */}
-                <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-slate-800">Auto-Open Receipt on Checkout</h4>
-                    <p className="text-[11px] text-slate-500">
-                      Instantly launches printable thermal receipt after sale confirmation
-                    </p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={autoPrintEnabled}
-                    onChange={(e) => setAutoPrintEnabled(e.target.checked)}
-                    className="w-5 h-5 accent-[#F28C28] rounded cursor-pointer"
-                  />
-                </div>
-
-                {/* Till Metadata */}
-                <div className="pt-4 border-t border-slate-100 space-y-2 text-slate-600">
-                  <div className="flex justify-between">
-                    <span className="font-semibold">Till Device ID:</span>
-                    <span className="font-mono text-slate-800">POS-ACCRA-TILL-01</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-semibold">Assigned Supermarket:</span>
-                    <span className="font-bold text-slate-900">{currentTenant.name}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-semibold">Local Currency:</span>
-                    <span className="font-bold text-slate-900">{currentTenant.currency} (GH₵)</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+      {/* Animated receipt printing display — automatic: prints, then self-dismisses */}
+      {printingSale && (
+        <ReceiptPrinterModal
+          sale={printingSale}
+          tenant={currentTenant}
+          paperSize={terminalSettings.printer_paper_size}
+          onPrint={() => onPrintLastReceipt(printingSale, { autoPrint: true })}
+          onClose={() => setPrintingSale(null)}
+        />
       )}
 
       {/* ========================================================================= */}

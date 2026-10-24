@@ -26,3 +26,160 @@ select,
 textarea {
   font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }
+
+/* ==========================================================================
+   Receipt printer modal — entrance, check pop, and receipt paper feed
+   ========================================================================== */
+@keyframes rpm-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rpm-check-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.14);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes rpm-paper-feed {
+  0% {
+    height: 0;
+  }
+  100% {
+    height: var(--rpm-paper-h, 260px);
+  }
+}
+
+@keyframes rpm-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rpm-modal {
+  animation: rpm-modal-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rpm-check {
+  animation: rpm-check-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+}
+
+.rpm-paper {
+  animation: rpm-paper-feed 2.1s cubic-bezier(0.25, 0.6, 0.3, 1) both;
+}
+
+.rpm-fade-up {
+  animation: rpm-fade-up 0.4s ease-out both;
+}
+
+/* ==========================================================================
+   Collapsible panel body — animates to/from auto height (grid 1fr -> 0fr)
+   ========================================================================== */
+.collapsible {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.28s ease;
+}
+
+.collapsible > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.collapsible.collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Thermal receipt printing — only the receipt goes to paper, never the POS
+   screen. Works for both the manual "Print Thermal" button and the automatic
+   post-checkout print (which renders the receipt off-screen).
+   ========================================================================== */
+
+/* Off-screen host for the automatic post-checkout print */
+.receipt-auto-print {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  background: #fff;
+}
+
+@media print {
+  /* Hide everything on the page... */
+  body * {
+    visibility: hidden;
+  }
+  /* ...except the receipt and its contents */
+  #printable-receipt,
+  #printable-receipt * {
+    visibility: visible;
+  }
+  /* Pin the receipt to the top-left of the page */
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-height: none !important;
+  }
+  /* Let the receipt escape any scroll/fixed containers it lives in */
+  .print-unclip {
+    position: static !important;
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    backdrop-filter: none !important;
+  }
+  .receipt-auto-print {
+    position: static !important;
+    left: auto !important;
+    background: transparent !important;
+  }
+}
+
+/* Respect the user's motion preferences: shorten everything instead of removing content */
+@media (prefers-reduced-motion: reduce) {
+  .rpm-modal,
+  .rpm-check,
+  .rpm-fade-up {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+  }
+  .rpm-paper {
+    animation-duration: 0.45s !important;
+    animation-delay: 0ms !important;
+  }
+  .collapsible {
+    transition-duration: 0.01ms !important;
+  }
+}

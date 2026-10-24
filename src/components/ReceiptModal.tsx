@@ -1,25 +1,107 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Printer, X, CheckCircle2, ShoppingCart } from 'lucide-react';
 import { formatGHS } from '../lib/money';
+import { printSaleReceipt } from '../lib/printBridge';
 import { Sale, Tenant } from '../types';
 
 interface ReceiptModalProps {
   sale: Sale;
   tenant: Tenant;
   onClose: () => void;
+  /**
+   * Silent post-checkout print: the receipt renders off-screen, sends straight
+   * to the printer and the modal closes itself — nothing is shown to the cashier.
+   * Leave undefined for the reprint flow, which shows the receipt for confirmation.
+   */
+  autoPrint?: boolean;
 }
 
-export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, tenant, onClose }) => {
+export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, tenant, onClose, autoPrint = false }) => {
   const receiptRef = useRef<HTMLDivElement>(null);
+  const printedRef = useRef(false);
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+  /**
+   * Set when the automatic print could not reach paper.
+   *
+   * The auto-print receipt renders off-screen, so an error would otherwise be
+   * invisible and the cashier would assume the customer had their receipt.
+   * Flipping this makes the modal render visibly — as the normal preview, with
+   * the error and a retry button — instead of dismissing.
+   */
+  const [autoFailed, setAutoFailed] = useState(false);
+
+  // `onClose` is often an inline arrow, so it changes identity every render.
+  // Reading it from a ref keeps the print timer from being cancelled by a
+  // re-render that lands inside the delay window.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  /** Renders as the visible preview rather than the off-screen print copy. */
+  const showAsDialog = !autoPrint || autoFailed;
+
+  /**
+   * Send the receipt to paper. Resolves true when paper was requested.
+   *
+   * Prefers the local print bridge (direct thermal output, no OS dialog) and
+   * falls back to the browser print dialog when the bridge isn't running —
+   * unless the owner pinned the path to hardware-only, in which case a failure
+   * is reported rather than quietly downgraded.
+   */
+  const sendToPrinter = async (): Promise<boolean> => {
+    if (printing) return false;
+    setPrinting(true);
+    setPrintError(null);
+    try {
+      const outcome = await printSaleReceipt(sale, tenant);
+      if (outcome.path === 'browser') {
+        window.print();
+        return true;
+      }
+      if (!outcome.ok) {
+        setPrintError(outcome.error);
+        return false;
+      }
+      return true;
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  // Automatic print: fire once the receipt is in the DOM, then dismiss.
+  // Only dismiss on success — a failure has to stay on screen so the cashier
+  // can reprint, instead of silently believing paper came out.
+  useEffect(() => {
+    if (!autoPrint || printedRef.current) return;
+    printedRef.current = true;
+    const timer = window.setTimeout(() => {
+      void sendToPrinter().then((ok) => {
+        if (ok) onCloseRef.current();
+        else setAutoFailed(true);
+      });
+    }, 120);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPrint]);
 
   const handlePrint = () => {
-    window.print();
+    void sendToPrinter();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[90vh]">
-        {/* Modal Top Bar */}
+    <div
+      className={
+        showAsDialog
+          ? 'fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4'
+          : 'receipt-auto-print'
+      }
+      role={showAsDialog ? 'dialog' : undefined}
+      aria-modal={showAsDialog ? true : undefined}
+      aria-hidden={showAsDialog ? undefined : true}
+    >
+      <div className="print-unclip bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[90vh]">
+        {/* Modal Top Bar (reprint flow, and a failed auto-print) */}
+        {showAsDialog && (
         <div className="flex items-center justify-between pb-3 border-b border-slate-200">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-emerald-600" />
@@ -33,9 +115,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, tenant, onClos
             <X className="w-4 h-4" />
           </button>
         </div>
+        )}
 
         {/* Printable Thermal Receipt (Formatted for 58mm / 80mm ESC/POS printers) */}
-        <div className="my-4 overflow-y-auto flex-1 bg-amber-50/30 p-4 border border-dashed border-slate-300 rounded-xl font-mono text-[11px] text-slate-800">
+        <div className="print-unclip my-4 overflow-y-auto flex-1 bg-amber-50/30 p-4 border border-dashed border-slate-300 rounded-xl font-mono text-[11px] text-slate-800">
           <div ref={receiptRef} id="printable-receipt" className="space-y-2">
             {/* Store Header */}
             <div className="text-center pb-2 border-b border-dashed border-slate-400">
@@ -140,22 +223,35 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, tenant, onClos
           </div>
         </div>
 
-        {/* Modal Bottom Buttons */}
-        <div className="flex items-center gap-3 pt-2">
-          <button
-            onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 transition"
-          >
-            Done
-          </button>
-          <button
-            onClick={handlePrint}
-            className="flex-1 py-2.5 rounded-xl bg-[#F28C28] hover:bg-orange-600 text-white text-xs font-black flex items-center justify-center gap-1.5 shadow-md shadow-orange-500/20 transition"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Print Thermal</span>
-          </button>
+        {/* Modal Bottom Buttons (reprint flow, and a failed auto-print) */}
+        {showAsDialog && (
+        <div className="pt-2 space-y-2">
+          {printError && (
+            <p
+              role="alert"
+              className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+            >
+              Thermal printer error: {printError}
+            </p>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 transition"
+            >
+              Done
+            </button>
+            <button
+              onClick={handlePrint}
+              disabled={printing}
+              className="flex-1 py-2.5 rounded-xl bg-[#F28C28] hover:bg-orange-600 text-white text-xs font-black flex items-center justify-center gap-1.5 shadow-md shadow-orange-500/20 transition disabled:opacity-60 disabled:cursor-wait"
+            >
+              <Printer className="w-4 h-4" />
+              <span>{printing ? 'Printing…' : 'Print Thermal'}</span>
+            </button>
+          </div>
         </div>
+        )}
       </div>
     </div>
   );

@@ -28,6 +28,7 @@ import {
   Download,
   Server,
   Zap,
+  ChevronDown,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -54,6 +55,38 @@ interface SuperAdminDashboardProps {
 
 const COLORS = ['#F28C28', '#102A4C', '#10B981', '#6366F1', '#8B5CF6'];
 
+type OverviewPanelKey = 'topProducts' | 'recentActivity' | 'systemHealth';
+
+/** Card header that collapses/expands its panel body with a chevron drop-down. */
+const PanelHeader: React.FC<{
+  title: string;
+  panelId: string;
+  open: boolean;
+  onToggle: () => void;
+  children?: React.ReactNode;
+}> = ({ title, panelId, open, onToggle, children }) => (
+  <div className="flex items-center justify-between gap-3 mb-4">
+    <h3 className="font-bold text-slate-900 text-sm">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="flex items-center gap-1.5 group focus:outline-none"
+      >
+        <span className="group-hover:text-[#F28C28] transition-colors">{title}</span>
+        <ChevronDown
+          aria-hidden="true"
+          className={`w-4 h-4 text-slate-400 group-hover:text-[#F28C28] transition-transform duration-300 ${
+            open ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
+    </h3>
+    {children}
+  </div>
+);
+
 export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   tenants,
   sales,
@@ -78,6 +111,18 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [newShopPhone, setNewShopPhone] = useState('+233 ');
   const [showAddShopModal, setShowAddShopModal] = useState(false);
 
+  // Revenue Overview range: 'today' = 2-hour slots, 'last7' = weekday totals, 'month' = day totals
+  const [revenueRange, setRevenueRange] = useState<'today' | 'last7' | 'month'>('today');
+
+  // Collapsible overview cards (Top Products, Recent Activity, System Health) — closed by default
+  const [openPanels, setOpenPanels] = useState<Record<OverviewPanelKey, boolean>>({
+    topProducts: false,
+    recentActivity: false,
+    systemHealth: false,
+  });
+  const togglePanel = (key: OverviewPanelKey) =>
+    setOpenPanels((prev) => ({ ...prev, [key]: !prev[key] }));
+
   // New staff state for users tab
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -89,15 +134,34 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   // Dynamic calculations from database
   const users = db.getUsers();
   const plans = db.getPlans();
-  const totalPlatformRevenue = sales.reduce((acc, curr) => acc + curr.total_amount, 0);
+
+  // Revenue never counts refunded or voided sales
+  const revenueSales = sales.filter((s) => s.status !== 'refunded' && s.status !== 'voided');
+  const totalPlatformRevenue = revenueSales.reduce((acc, curr) => acc + curr.total_amount, 0);
   const totalShopsCount = tenants.length;
   const activeShopsCount = tenants.filter((t) => t.is_active).length;
   const activeSubscriptionsCount = tenants.filter((t) => t.subscription_status === 'active').length;
 
+  // Real "vs. last 7 days" comparison, using the same calendar-day boundaries as the chart
+  // (null when the previous window has no sales to compare against)
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayMs = todayStart.getTime();
+  const revenueInWindow = (from: number, to: number) =>
+    revenueSales.reduce((acc, s) => {
+      const saleMs = new Date(s.created_at).getTime();
+      return !Number.isNaN(saleMs) && saleMs >= from && saleMs < to ? acc + s.total_amount : acc;
+    }, 0);
+  const revenueLast7Days = revenueInWindow(todayMs - 6 * DAY_MS, todayMs + DAY_MS);
+  const revenuePrev7Days = revenueInWindow(todayMs - 13 * DAY_MS, todayMs - 6 * DAY_MS);
+  const revenueChangePercent =
+    revenuePrev7Days > 0 ? ((revenueLast7Days - revenuePrev7Days) / revenuePrev7Days) * 100 : null;
+
   // Sales by shop
   const shopSalesMap = new Map<string, number>();
-  sales.forEach((s) => {
-    const shopName = s.shop_name || 'Accra Mall';
+  revenueSales.forEach((s) => {
+    const shopName = s.shop_name || 'Unassigned Shop';
     shopSalesMap.set(shopName, (shopSalesMap.get(shopName) || 0) + s.total_amount);
   });
 
@@ -106,26 +170,60 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     value: Math.round(value),
   }));
 
-  if (salesByShopData.length === 0) {
-    salesByShopData.push({ name: 'Accra Mall', value: 1 });
-  }
-
-  // Hourly Revenue Trend
-  const revenueTrendData = [
-    { time: '8am', revenue: 1200 },
-    { time: '10am', revenue: 3800 },
-    { time: '12pm', revenue: 7400 },
-    { time: '2pm', revenue: 6200 },
-    { time: '4pm', revenue: 12450 },
-    { time: '6pm', revenue: 9800 },
-    { time: '8pm', revenue: 5400 },
-    { time: '10pm', revenue: 2500 },
+  // Revenue trend — real sales bucketed by the selected range (live, no sample data)
+  // 2-hour trading slots (first and last bucket absorb anything outside them)
+  const TRADING_SLOTS = [
+    { time: '8am', from: 0, to: 10 },
+    { time: '10am', from: 10, to: 12 },
+    { time: '12pm', from: 12, to: 14 },
+    { time: '2pm', from: 14, to: 16 },
+    { time: '4pm', from: 16, to: 18 },
+    { time: '6pm', from: 18, to: 20 },
+    { time: '8pm', from: 20, to: 22 },
+    { time: '10pm', from: 22, to: 24 },
   ];
 
-  if (sales.length > 5) {
-    const recentSum = sales.slice(0, 5).reduce((acc, s) => acc + s.total_amount, 0);
-    revenueTrendData[4].revenue = 12450 + recentSum;
+  const revenueTrendData: { time: string; revenue: number }[] = [];
+
+  if (revenueRange === 'today') {
+    TRADING_SLOTS.forEach((slot) => {
+      const revenue = revenueSales.reduce((acc, s) => {
+        const saleMs = new Date(s.created_at).getTime();
+        const hour = new Date(saleMs).getHours();
+        const inDay = saleMs >= todayMs && saleMs < todayMs + DAY_MS;
+        const inSlot = hour >= slot.from && hour < slot.to;
+        return inDay && inSlot ? acc + s.total_amount : acc;
+      }, 0);
+      revenueTrendData.push({ time: slot.time, revenue: Math.round(revenue) });
+    });
+  } else if (revenueRange === 'last7') {
+    for (let i = 6; i >= 0; i--) {
+      const dayStart = todayMs - i * DAY_MS;
+      revenueTrendData.push({
+        time: new Date(dayStart).toLocaleDateString([], { weekday: 'short' }),
+        revenue: Math.round(revenueInWindow(dayStart, dayStart + DAY_MS)),
+      });
+    }
+  } else {
+    // 'month' — days so far in the current month
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const daysSoFar = Math.max(1, new Date().getDate());
+    for (let i = 0; i < daysSoFar; i++) {
+      const dayStart = monthStart.getTime() + i * DAY_MS;
+      revenueTrendData.push({
+        time: `${i + 1}`,
+        revenue: Math.round(revenueInWindow(dayStart, dayStart + DAY_MS)),
+      });
+    }
   }
+
+  const trendTotal = revenueTrendData.reduce((acc, p) => acc + p.revenue, 0);
+  const trendPeak = revenueTrendData.reduce(
+    (best, p) => (p.revenue > best.revenue ? p : best),
+    revenueTrendData[0] || { time: '', revenue: 0 }
+  );
 
   // Top Selling Products across platform
   const productSalesMap = new Map<string, { product: Product; amount: number; qty: number }>();
@@ -201,7 +299,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   return (
     <div className="flex flex-col md:flex-row min-h-[calc(100vh-4rem)] bg-[#F5F7FA]">
       {/* Mobile Horizontal Navigation Header */}
-      <div className="md:hidden bg-[#102A4C] text-white p-2 flex items-center overflow-x-auto gap-1.5 border-b border-slate-700 w-full flex-shrink-0">
+      <div className="md:hidden sticky top-16 z-20 bg-[#102A4C] text-white p-2 flex items-center overflow-x-auto gap-1.5 border-b border-slate-700 w-full flex-shrink-0">
         {[
           { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
           { id: 'shops', label: 'Shops', icon: Store, count: totalShopsCount },
@@ -236,7 +334,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       </div>
 
       {/* Left Sidebar */}
-      <aside className="w-64 bg-[#102A4C] text-slate-300 flex-shrink-0 hidden md:flex flex-col border-r border-slate-800">
+      <aside className="w-64 bg-[#102A4C] text-slate-300 flex-shrink-0 hidden md:flex flex-col border-r border-slate-800 sticky top-16 self-start h-[calc(100vh-4rem)] overflow-y-auto">
         <div className="p-4 border-b border-slate-800/80">
           <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
             Platform Menu
@@ -355,12 +453,26 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 <div>
                   <p className="text-xs font-semibold text-slate-500">Total Revenue</p>
                   <h3 className="text-2xl font-black text-slate-900 mt-1 tracking-tight">
-                    {formatGHS(totalPlatformRevenue || 48750)}
+                    {formatGHS(totalPlatformRevenue)}
                   </h3>
-                  <p className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1 mt-1">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>↑ 12.5%</span>
-                    <span className="text-slate-400 font-normal">vs. last 7 days</span>
+                  <p className="text-[11px] font-semibold flex items-center gap-1 mt-1">
+                    {revenueChangePercent === null ? (
+                      <>
+                        <span className="text-slate-400 font-normal">no prior 7-day data to compare</span>
+                      </>
+                    ) : (
+                      <>
+                        <TrendingUp
+                          className={`w-3.5 h-3.5 ${
+                            revenueChangePercent >= 0 ? 'text-emerald-500' : 'text-rose-500 rotate-180'
+                          }`}
+                        />
+                        <span className={revenueChangePercent >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                          {revenueChangePercent >= 0 ? '↑' : '↓'} {Math.abs(revenueChangePercent).toFixed(1)}%
+                        </span>
+                        <span className="text-slate-400 font-normal">vs. last 7 days</span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="w-12 h-12 rounded-2xl bg-orange-500/10 text-[#F28C28] flex items-center justify-center flex-shrink-0">
@@ -432,16 +544,31 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                         Live
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-0.5">Today's transactions peak at 4:32 PM (GH₵ 12,450)</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {trendTotal > 0
+                        ? `Busiest ${revenueRange === 'today' ? 'slot' : 'period'} ${trendPeak.time} (${formatGHS(trendPeak.revenue)}) · total ${formatGHS(trendTotal)}`
+                        : 'No sales yet in this range — revenue appears here the moment a till completes a sale.'}
+                    </p>
                   </div>
-                  <select aria-label="Overview Range" className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 focus:outline-none">
-                    <option>Today</option>
-                    <option>Last 7 days</option>
-                    <option>This Month</option>
+                  <select
+                    aria-label="Overview Range"
+                    value={revenueRange}
+                    onChange={(e) => setRevenueRange(e.target.value as 'today' | 'last7' | 'month')}
+                    className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 focus:outline-none"
+                  >
+                    <option value="today">Today</option>
+                    <option value="last7">Last 7 days</option>
+                    <option value="month">This Month</option>
                   </select>
                 </div>
 
-                <div className="h-64 w-full">
+                <div className="relative h-64 w-full">
+                  {trendTotal === 0 && (
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 pointer-events-none">
+                      <Activity className="w-6 h-6 text-slate-300" />
+                      <p className="text-xs font-semibold text-slate-400">No revenue recorded in this range</p>
+                    </div>
+                  )}
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={revenueTrendData}>
                       <defs>
@@ -456,7 +583,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                         stroke="#94A3B8"
                         fontSize={11}
                         tickLine={false}
-                        tickFormatter={(v) => `${v / 1000}k`}
+                        width={44}
+                        tickFormatter={(v: number) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`)}
                       />
                       <Tooltip
                         formatter={(val: unknown) => [formatGHS(Number(val) || 0), 'Revenue']}
@@ -513,7 +641,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                     <span className="text-[11px] font-bold text-slate-400">Total Sales</span>
                     <span className="text-sm font-extrabold text-slate-800">
-                      {formatGHS(totalPlatformRevenue || 48750).split('.')[0]}
+                      {formatGHS(totalPlatformRevenue).split('.')[0]}
                     </span>
                   </div>
                 </div>
@@ -540,15 +668,26 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             {/* Lower Grid: Top Products, Recent Activity & System Health */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-slate-900 text-sm">Top Products</h3>
+                <PanelHeader
+                  title="Top Products"
+                  panelId="sa-panel-top-products"
+                  open={openPanels.topProducts}
+                  onToggle={() => togglePanel('topProducts')}
+                >
                   <select aria-label="Select Products Date Range" className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none">
                     <option>Last 7 days</option>
                     <option>Today</option>
                   </select>
-                </div>
+                </PanelHeader>
 
-                <div className="space-y-3.5">
+                <div
+                  id="sa-panel-top-products"
+                  role="region"
+                  aria-label="Top Products"
+                  className={`collapsible ${openPanels.topProducts ? '' : 'collapsed'}`}
+                >
+                  <div>
+                  <div className="space-y-3.5">
                   {(topProductsList.length > 0
                     ? topProductsList.map((item) => ({
                         name: item.product.name,
@@ -577,23 +716,36 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                       </span>
                     </div>
                   ))}
+                  </div>
+                  </div>
                 </div>
               </div>
 
               {/* Recent Activity Table */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
                 <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-bold text-slate-900 text-sm">Recent Activity</h3>
+                  <PanelHeader
+                    title="Recent Activity"
+                    panelId="sa-panel-recent-activity"
+                    open={openPanels.recentActivity}
+                    onToggle={() => togglePanel('recentActivity')}
+                  >
                     <button
                       onClick={() => setActiveTab('transactions')}
                       className="text-xs font-bold text-[#F28C28] hover:underline"
                     >
                       View All
                     </button>
-                  </div>
+                  </PanelHeader>
 
-                  <div className="overflow-x-auto">
+                  <div
+                    id="sa-panel-recent-activity"
+                    role="region"
+                    aria-label="Recent Activity"
+                    className={`collapsible ${openPanels.recentActivity ? '' : 'collapsed'}`}
+                  >
+                    <div>
+                    <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr className="border-b border-slate-100 text-slate-400 font-semibold">
@@ -630,14 +782,28 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                         ))}
                       </tbody>
                     </table>
+                    </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* System Health */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                <h3 className="font-bold text-slate-900 text-sm mb-4">System Health</h3>
-                <div className="space-y-3">
+                <PanelHeader
+                  title="System Health"
+                  panelId="sa-panel-system-health"
+                  open={openPanels.systemHealth}
+                  onToggle={() => togglePanel('systemHealth')}
+                />
+                <div
+                  id="sa-panel-system-health"
+                  role="region"
+                  aria-label="System Health"
+                  className={`collapsible ${openPanels.systemHealth ? '' : 'collapsed'}`}
+                >
+                  <div>
+                  <div className="space-y-3">
                   {[
                     { label: 'Backend Server', status: 'Online' },
                     { label: 'Database', status: 'Online' },
@@ -660,6 +826,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   <p className="text-[11px] font-semibold text-emerald-800">
                     All {tenants.length} Supermarket tenants operational. 0 network incidents reported.
                   </p>
+                </div>
+                  </div>
                 </div>
               </div>
             </div>

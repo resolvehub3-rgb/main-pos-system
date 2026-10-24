@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Local print bridge runtime artifacts.
+# Spooled receipts (may contain real sale data) and the shared secret must
+# never be committed.
+print-spool/
+print-bridge/.bridge-token

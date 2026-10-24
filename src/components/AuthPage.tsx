@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShoppingCart,
   Lock,
@@ -31,6 +31,15 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [scrolled, setScrolled] = useState<boolean>(false);
+
+  // Elevate the sticky navbar once the page starts scrolling
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState<string>('');
@@ -119,7 +128,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
       </div>
 
       {/* Top Brand Bar */}
-      <header className="relative z-10 border-b border-slate-800/80 bg-[#102A4C]/70 backdrop-blur-md px-6 py-4">
+      <header
+        className={`sticky top-0 z-30 border-b border-slate-800/80 bg-[#102A4C]/70 backdrop-blur-md px-6 py-4 transition-shadow duration-300 ${
+          scrolled ? 'shadow-lg shadow-black/30' : ''
+        }`}
+      >
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#F28C28] flex items-center justify-center text-white shadow-lg shadow-orange-500/25">
@@ -164,10 +177,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                 {/* Primary Heading */}
                 <div className="space-y-2">
                   <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-                    Ghana&apos;s Leading Multi-Tenant Supermarket &amp; Retail POS
+                    Ghana&apos;s Supermarket POS, Built for Busy Tills
                   </h2>
                   <p className="text-sm sm:text-base text-slate-300 font-medium leading-relaxed">
-                    Fast, dependable, and securely isolated retail checkout built specifically for modern Ghanaian supermarkets, mart chains, and frontline cashiers.
+                    Fast, secure checkout made for Ghanaian supermarkets and their cashiers.
                   </p>
                 </div>
 
@@ -179,9 +192,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Zap className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Instant Barcode Scanning &amp; Receipts</h3>
+                        <h3 className="text-sm font-bold text-white">Instant Barcode Scanning</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Ring up products in milliseconds with EAN-13, UPC-A, and custom SKU support with automatic price lookups and thermal receipt printing.
+                          Scan EAN-13, UPC-A or custom SKUs and print receipts in seconds.
                         </p>
                       </div>
                     </div>
@@ -193,9 +206,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Smartphone className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Cash &amp; Mobile Money Payments</h3>
+                        <h3 className="text-sm font-bold text-white">Cash &amp; Mobile Money</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Accept cash with automatic change calculations, MTN Mobile Money, Telecel Cash, and bank debit cards with split-tender support.
+                          Cash with auto change, MTN MoMo, Telecel Cash and bank cards.
                         </p>
                       </div>
                     </div>
@@ -207,9 +220,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <BarChart3 className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Real-Time Inventory &amp; Margin Reports</h3>
+                        <h3 className="text-sm font-bold text-white">Live Stock &amp; Margin Reports</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Automatic inventory deduction on every barcode scan, low-stock reorder warnings, supplier cost tracking, and end-of-shift drawer reconciliation.
+                          Stock drops on every scan, with low-stock alerts and shift reports.
                         </p>
                       </div>
                     </div>
@@ -221,9 +234,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Coins className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Enterprise Tenant Isolation</h3>
+                        <h3 className="text-sm font-bold text-white">Private Per-Store Data</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Strict role-based permissions and Row Level Security backed by real Supabase cloud sync ensuring your supermarket data remains completely private.
+                          Role-based access and row-level security keep every supermarket separate.
                         </p>
                       </div>
                     </div>
@@ -242,20 +255,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                   </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>Real-time Supabase Sync</span>
+                    <span>Real-time Cloud Sync</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>Profile Corner Logout</span>
+                    <span>One-Tap Logout</span>
                   </div>
                 </div>
 
                 {/* Retailer Quote Box */}
                 <div className="p-4 rounded-2xl bg-gradient-to-r from-[#102A4C] to-slate-900 border border-slate-800 text-xs text-slate-400 italic">
-                  &ldquo;Samtech Helper POS transformed our checkout flow across our Accra Mall and Spintex stores. Fast, error-free, and easy for cashiers to master on day one.&rdquo;
+                  &ldquo;Fast and error-free. Our cashiers mastered it on day one.&rdquo;
                   <div className="mt-2 not-italic font-bold text-slate-200 text-[11px] flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-[#F28C28]" />
-                    <span>Accra Mall &amp; Spintex Retail Operations</span>
+                    <span>Accra Mall &amp; Spintex Stores</span>
                   </div>
                 </div>
               </div>
@@ -265,10 +278,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                 {/* Primary Heading */}
                 <div className="space-y-2">
                   <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-                    Empowering Modern Ghanaian Supermarkets.
+                    Set Up Your Supermarket in Minutes
                   </h2>
                   <p className="text-sm sm:text-base text-slate-300 font-medium leading-relaxed">
-                    Set up your retail business on a solid foundation with persistent cloud storage, multi-branch capability, and lightning-fast POS tills.
+                    Cloud storage, multi-branch support and fast tills — ready from opening day.
                   </p>
                 </div>
 
@@ -282,7 +295,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                       <div>
                         <h3 className="text-sm font-bold text-white">Instant Catalogue Setup</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Your supermarket starts with pre-indexed Ghanaian grocery barcodes, categories, and inventory structures ready for opening day.
+                          Ghanaian grocery barcodes, categories and stock lists come pre-loaded.
                         </p>
                       </div>
                     </div>
@@ -294,9 +307,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Smartphone className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Multi-Tender Cash &amp; MoMo Payments</h3>
+                        <h3 className="text-sm font-bold text-white">Cash, MoMo &amp; Card Payments</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Accept cash with automated change calculation, MTN Mobile Money, Telecel Cash, and bank cards with dual-display receipt support.
+                          Auto change for cash, plus MTN MoMo, Telecel Cash and bank cards.
                         </p>
                       </div>
                     </div>
@@ -308,9 +321,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <BarChart3 className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Real-Time Profit &amp; Stock Intelligence</h3>
+                        <h3 className="text-sm font-bold text-white">Live Profit &amp; Stock Reports</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Automatic inventory deduction on every barcode scan, supplier cost tracking, and end-of-shift drawer reconciliation reports.
+                          Track costs and margins, with automatic stock counts and shift reports.
                         </p>
                       </div>
                     </div>
@@ -322,9 +335,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Coins className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Enterprise Row-Level Security</h3>
+                        <h3 className="text-sm font-bold text-white">Secure Per-Store Access</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Every supermarket tenant is strictly isolated. Cashiers cannot tamper with pricing, and owners have full audit trails.
+                          Each store is isolated. Cashiers can&apos;t change prices; owners see every action.
                         </p>
                       </div>
                     </div>
@@ -336,15 +349,15 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                   <div className="font-bold text-white text-xs">Getting Started:</div>
                   <div className="flex items-center gap-2">
                     <span className="w-5 h-5 rounded-full bg-[#F28C28] text-white flex items-center justify-center text-[10px] font-bold">1</span>
-                    <span>Enter your supermarket store name and store address.</span>
+                    <span>Enter your store name and address.</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-5 h-5 rounded-full bg-[#F28C28] text-white flex items-center justify-center text-[10px] font-bold">2</span>
-                    <span>Fill in your store owner credentials and security PIN.</span>
+                    <span>Add your owner details and PIN.</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-5 h-5 rounded-full bg-[#F28C28] text-white flex items-center justify-center text-[10px] font-bold">3</span>
-                    <span>Direct access to your dedicated workspace immediately!</span>
+                    <span>Your workspace opens right away.</span>
                   </div>
                 </div>
               </div>
