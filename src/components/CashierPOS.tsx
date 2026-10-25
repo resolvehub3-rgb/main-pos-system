@@ -100,6 +100,11 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   const [countedCash, setCountedCash] = useState<string>('');
   const [shiftCloseNotes, setShiftCloseNotes] = useState('');
 
+  // Shift opening modal — every control on the drawer screen resolves against
+  // an open shift, so a till that cannot open one has nothing to reconcile.
+  const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
+  const [openingFloat, setOpeningFloat] = useState<string>('');
+
   // Price checker state
   const [checkerQuery, setCheckerQuery] = useState('');
   const [checkedProduct, setCheckedProduct] = useState<Product | null>(null);
@@ -133,7 +138,19 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   const sales = db.getSales(currentTenant.id);
   const parkedCarts = db.getParkedCarts(currentTenant.id);
   const currentShift = activeShift || db.getActiveShift(currentTenant.id);
-  const cashMovements = db.getCashMovements(currentShift?.id);
+  // `getCashMovements` with no filter returns *every* movement in the store,
+  // so an unfiltered call here would keep showing a closed shift's drawer.
+  const cashMovements = currentShift ? db.getCashMovements(currentShift.id) : [];
+
+  // Takings since this shift opened. The four summary cards sit under a
+  // "Shift" heading, so lifetime totals would report the shop's whole month
+  // as this drawer's takings — and with no shift open there is nothing to
+  // report at all.
+  const salesSinceShift = currentShift
+    ? sales.filter(
+        (s) => new Date(s.created_at).getTime() >= new Date(currentShift.start_time).getTime()
+      )
+    : [];
 
   // Who is actually signed on to this till, and whether their till is open.
   // The sidebar footer used to print a fixed placeholder name and initials
@@ -370,9 +387,38 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
     e.preventDefault();
     if (!currentShift) return;
     const count = parseFloat(countedCash) || 0;
+    const expected = currentShift.expected_cash ?? 0;
     db.closeShift(currentShift.id, count, shiftCloseNotes);
     setShowCloseShiftModal(false);
-    alert('Shift closed successfully. Z-Report generated.');
+    alert(
+      `Shift closed. Counted ${formatGHS(count)} against ${formatGHS(
+        expected
+      )} expected — variance ${formatGHS(count - expected)}.`
+    );
+  };
+
+  // Handle shift open. Cash In, Cash Out and Close Shift all resolve against
+  // `currentShift` and returned early when there was none — which is why the
+  // drawer screen looked broken: the modal opened, the form submitted, and
+  // nothing happened, not even the modal closing.
+  const handleOpenShift = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (currentShift) {
+      setShowOpenShiftModal(false);
+      return;
+    }
+    const float = parseFloat(openingFloat);
+    if (!Number.isFinite(float) || float < 0) return;
+
+    db.openShift(
+      currentTenant.id,
+      'branch-main',
+      signedInCashier?.id || 'cashier',
+      signedInCashier?.full_name || 'Cashier',
+      float
+    );
+    setShowOpenShiftModal(false);
+    setOpeningFloat('');
   };
 
   // Compute cash change
@@ -1054,38 +1100,61 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowCashMovementModal('cash_in')}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
-                >
-                  <ArrowDownLeft className="w-4 h-4" />
-                  <span>Cash In (Float)</span>
-                </button>
+                {currentShift ? (
+                  <>
+                    <button
+                      onClick={() => setShowCashMovementModal('cash_in')}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                    >
+                      <ArrowDownLeft className="w-4 h-4" />
+                      <span>Cash In (Float)</span>
+                    </button>
 
-                <button
-                  onClick={() => setShowCashMovementModal('cash_out')}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition shadow-sm"
-                >
-                  <ArrowUpRight className="w-4 h-4" />
-                  <span>Cash Out (Drop)</span>
-                </button>
+                    <button
+                      onClick={() => setShowCashMovementModal('cash_out')}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                    >
+                      <ArrowUpRight className="w-4 h-4" />
+                      <span>Cash Out (Drop)</span>
+                    </button>
 
-                <button
-                  onClick={() => setShowCloseShiftModal(true)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F28C28] hover:bg-orange-600 text-white rounded-xl text-xs font-bold transition shadow-sm"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Close Shift</span>
-                </button>
+                    <button
+                      onClick={() => setShowCloseShiftModal(true)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-[#F28C28] hover:bg-orange-600 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Close Shift</span>
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setShowOpenShiftModal(true)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                  >
+                    <PlayCircle className="w-4 h-4" />
+                    <span>Open Shift</span>
+                  </button>
+                )}
               </div>
             </div>
+
+            {!currentShift && (
+              <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200">
+                <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-amber-800 leading-relaxed">
+                  <span className="font-black">No shift open on this till.</span> Open one to
+                  record cash float, cash drops and the closing count — until then there is no
+                  drawer to reconcile.
+                </p>
+              </div>
+            )}
 
             {/* Shift Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <span className="text-xs font-semibold text-slate-500">Opening Float</span>
                 <h3 className="text-2xl font-black text-slate-900 mt-1">
-                  {formatGHS(currentShift?.opening_cash || 250)}
+                  {formatGHS(currentShift?.opening_cash ?? 0)}
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-1">Started at till opening</p>
               </div>
@@ -1093,7 +1162,7 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                 <span className="text-xs font-semibold text-slate-500">Cash Sales (Shift)</span>
                 <h3 className="text-2xl font-black text-emerald-600 mt-1">
-                  {formatGHS(currentShift?.cash_sales || 287)}
+                  {formatGHS(currentShift?.cash_sales ?? 0)}
                 </h3>
                 <p className="text-[11px] text-emerald-600 mt-1">Direct cash tendered</p>
               </div>
@@ -1102,18 +1171,18 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                 <span className="text-xs font-semibold text-slate-500">Mobile Money Sales</span>
                 <h3 className="text-2xl font-black text-blue-600 mt-1">
                   {formatGHS(
-                    sales
+                    salesSinceShift
                       .filter((s) => s.payment_method === 'mobile_money')
                       .reduce((acc, curr) => acc + curr.total_amount, 0)
                   )}
                 </h3>
-                <p className="text-[11px] text-blue-600 mt-1">MTN & Telecel Cash</p>
+                <p className="text-[11px] text-blue-600 mt-1">MTN &amp; Telecel Cash this shift</p>
               </div>
 
               <div className="bg-gradient-to-br from-[#102A4C] to-slate-800 text-white p-5 rounded-2xl shadow-sm">
                 <span className="text-xs font-semibold text-slate-300">Expected Cash In Till</span>
                 <h3 className="text-2xl font-black text-white mt-1">
-                  {formatGHS(currentShift?.expected_cash || 537)}
+                  {formatGHS(currentShift?.expected_cash ?? 0)}
                 </h3>
                 <p className="text-[11px] text-orange-300 mt-1">Float + Cash Sales</p>
               </div>
@@ -1594,16 +1663,16 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1 text-xs text-slate-600 mb-4">
               <div className="flex justify-between">
                 <span>Opening Cash:</span>
-                <span className="font-bold">{formatGHS(currentShift?.opening_cash || 250)}</span>
+                <span className="font-bold">{formatGHS(currentShift?.opening_cash ?? 0)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Cash Sales Recorded:</span>
-                <span className="font-bold">{formatGHS(currentShift?.cash_sales || 287)}</span>
+                <span className="font-bold">{formatGHS(currentShift?.cash_sales ?? 0)}</span>
               </div>
               <div className="flex justify-between text-slate-900 font-black pt-1 border-t border-slate-200">
                 <span>Expected Total:</span>
                 <span className="text-[#F28C28]">
-                  {formatGHS(currentShift?.expected_cash || 537)}
+                  {formatGHS(currentShift?.expected_cash ?? 0)}
                 </span>
               </div>
             </div>
@@ -1618,7 +1687,7 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                   value={countedCash}
                   onChange={(e) => setCountedCash(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-black text-lg text-slate-900"
-                  placeholder="537.00"
+                  placeholder={String(currentShift?.expected_cash ?? 0)}
                 />
               </div>
 
@@ -1647,6 +1716,63 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                 className="flex-1 py-2.5 rounded-xl bg-[#F28C28] hover:bg-orange-600 text-white font-extrabold text-xs shadow-md"
               >
                 Complete Shift Closing
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* 8. Open Shift Modal */}
+      {showOpenShiftModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <form
+            onSubmit={handleOpenShift}
+            className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100"
+          >
+            <h3 className="text-base font-black text-slate-900 mb-1">Open Till Shift</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Count the starting float in the drawer. Every cash movement on this till is
+              reconciled against it when you close.
+            </p>
+
+            <div className="space-y-3 text-xs font-semibold text-slate-700 mb-4">
+              <div>
+                <label className="block mb-1">Opening Float (GH₵):</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  required
+                  value={openingFloat}
+                  onChange={(e) => setOpeningFloat(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-black text-lg text-slate-900"
+                  placeholder="0.00"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 mb-5">
+              Opening for{' '}
+              <span className="font-bold text-slate-600">
+                {signedInCashier?.full_name || 'Cashier'}
+              </span>{' '}
+              at {currentTenant.name}
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowOpenShiftModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 font-bold text-xs text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+              >
+                Start Shift
               </button>
             </div>
           </form>

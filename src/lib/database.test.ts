@@ -105,3 +105,56 @@ test('deleteUser removes a cashier but refuses to strand the shop', () => {
     db.setCurrentUser(signedInAs);
   }
 });
+
+test('a shift opens, absorbs cash sales and drawer movements, then closes', () => {
+  const tenant = 'tenant-shift-1';
+
+  // The drawer screen has nothing to reconcile until a till opens one — every
+  // control on it resolves against `getActiveShift`.
+  assert.equal(db.getActiveShift(tenant), undefined);
+
+  const shift = db.openShift(tenant, 'branch-main', 'cashier-shift', 'Kwesi Arrow', 250);
+  assert.equal(db.getActiveShift(tenant)?.id, shift.id, 'an open shift is the active one');
+  assert.equal(shift.cash_sales, 0);
+  assert.equal(shift.expected_cash, 250, 'expected cash starts at the float');
+
+  const prod = db.addProduct({
+    tenant_id: tenant,
+    name: 'Shift Test Milk 500ml',
+    sku: 'MILK-500-SHIFT',
+    barcode: '6001112223334',
+    cost_price: 45,
+    selling_price: 110,
+    stock_quantity: 10,
+    min_stock_threshold: 2,
+    image_url: '',
+    unit: 'Carton',
+    is_active: true,
+  });
+
+  db.processSale({
+    tenant_id: tenant,
+    branch_id: 'branch-main',
+    cashier_id: 'cashier-shift',
+    cashier_name: 'Kwesi Arrow',
+    shop_name: 'Shift Test Mart',
+    payment_method: 'cash',
+    items: [{ productId: prod.id, quantity: 2 }],
+  });
+
+  const afterSale = db.getActiveShift(tenant)!;
+  assert.equal(afterSale.cash_sales, 220, 'cash sales are credited to the open shift');
+  assert.equal(afterSale.expected_cash, 470);
+
+  db.recordCashMovement(tenant, shift.id, 'cash_in', 50, 'Top-up from the safe');
+  db.recordCashMovement(tenant, shift.id, 'cash_out', 30, 'Drop to the safe');
+
+  const afterMoves = db.getActiveShift(tenant)!;
+  assert.equal(afterMoves.expected_cash, 490, 'cash in raises the drawer, cash out lowers it');
+  assert.equal(db.getCashMovements(shift.id).length, 2, 'both movements belong to the shift');
+
+  const closed = db.closeShift(shift.id, 490, 'Balanced');
+  assert.equal(closed?.status, 'closed');
+  assert.equal(closed?.closing_cash, 490);
+  assert.equal(db.getActiveShift(tenant), undefined, 'a closed shift is no longer active');
+});
