@@ -1,0 +1,27 @@
+{
+  "name": "Samtech Helper POS",
+  "short_name": "SamTill",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F5F7FA",
+  "theme_color": "#102A4C",
+  "description": "Production-ready multi-tenant supermarket and retail POS SaaS built for Ghanaian businesses, with real Supabase database, live sales analytics, barcode scanning, inventory ledger and role-based access.",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
