@@ -11,7 +11,6 @@ import {
   Building,
   MapPin,
   KeyRound,
-  Sparkles,
   CheckCircle2,
   Zap,
   BarChart3,
@@ -140,17 +139,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
               className="h-12 w-auto flex-shrink-0 rounded-xl bg-white shadow-lg shadow-black/25"
             />
             <div>
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider bg-orange-500/20 text-[#F28C28] border border-orange-500/30 px-2 py-0.5 rounded-full">
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400">Smarter Shops. Greater Growth. 🇬🇭</p>
+              <p className="text-[11px] text-slate-400">Point of sale for supermarkets in Ghana</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Realtime POS Database Active</span>
+            <span>Works online and offline</span>
           </div>
         </div>
       </header>
@@ -170,14 +165,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                 {/* Primary Heading */}
                 <div className="space-y-2">
                   <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-                    Ghana&apos;s Supermarket POS, Built for Busy Tills
+                    Supermarket POS for Ghana
                   </h2>
                   <p className="text-sm sm:text-base text-slate-300 font-medium leading-relaxed">
-                    Fast, secure checkout made for Ghanaian supermarkets and their cashiers.
+                    Scan items, take cash, MoMo or card, and print the receipt at the till.
                   </p>
                 </div>
 
-                {/* Clean Feature Highlights */}
+                {/* Feature Highlights */}
                 <div className="space-y-3.5 pt-2">
                   <div className="p-4 rounded-2xl bg-[#102A4C]/80 border border-slate-700/70 hover:border-orange-500/50 transition">
                     <div className="flex items-start gap-3">
@@ -185,9 +180,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Zap className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Instant Barcode Scanning</h3>
+                        <h3 className="text-sm font-bold text-white">Barcode checkout</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Scan EAN-13, UPC-A or custom SKUs and print receipts in seconds.
+                          Scan a barcode or type a SKU and the item lands in the cart with its price.
                         </p>
                       </div>
                     </div>
@@ -199,9 +194,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Smartphone className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Cash &amp; Mobile Money</h3>
+                        <h3 className="text-sm font-bold text-white">Cash, MoMo and card</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Cash with auto change, MTN MoMo, Telecel Cash and bank cards.
+                          Cash counts the change for you. MTN MoMo, Telecel Cash and card are
+                          recorded against the same sale.
                         </p>
                       </div>
                     </div>
@@ -213,9 +209,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <BarChart3 className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Live Stock &amp; Margin Reports</h3>
+                        <h3 className="text-sm font-bold text-white">Stock and sales reports</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Stock drops on every scan, with low-stock alerts and shift reports.
+                          Stock drops with every sale. Low-stock alerts, daily sales and shift
+                          totals sit in the owner dashboard.
                         </p>
                       </div>
                     </div>
@@ -227,9 +224,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Coins className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Private Per-Store Data</h3>
+                        <h3 className="text-sm font-bold text-white">Owner and cashier logins</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Role-based access and row-level security keep every supermarket separate.
+                          Each shop signs in separately. Cashiers use the till; owners see sales,
+                          stock and staff.
                         </p>
                       </div>
                     </div>
@@ -240,28 +238,19 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                 <div className="pt-2 grid grid-cols-2 gap-3 text-xs text-slate-300">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>Ghana Cedi (GHS) Native</span>
+                    <span>Prices in Ghana cedis</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>MTN MoMo &amp; Telecel Cash</span>
+                    <span>MTN MoMo and Telecel Cash</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>Real-time Cloud Sync</span>
+                    <span>Saved to the cloud</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>One-Tap Logout</span>
-                  </div>
-                </div>
-
-                {/* Retailer Quote Box */}
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-[#102A4C] to-slate-900 border border-slate-800 text-xs text-slate-400 italic">
-                  &ldquo;Fast and error-free. Our cashiers mastered it on day one.&rdquo;
-                  <div className="mt-2 not-italic font-bold text-slate-200 text-[11px] flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-[#F28C28]" />
-                    <span>Accra Mall &amp; Spintex Stores</span>
+                    <span>Thermal receipt printing</span>
                   </div>
                 </div>
               </div>
@@ -271,10 +260,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                 {/* Primary Heading */}
                 <div className="space-y-2">
                   <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-                    Set Up Your Supermarket in Minutes
+                    Set up your supermarket
                   </h2>
                   <p className="text-sm sm:text-base text-slate-300 font-medium leading-relaxed">
-                    Cloud storage, multi-branch support and fast tills — ready from opening day.
+                    Add your shop details, then add products and cashier accounts as you go.
                   </p>
                 </div>
 
@@ -286,9 +275,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Zap className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Instant Catalogue Setup</h3>
+                        <h3 className="text-sm font-bold text-white">Build your product list</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Ghanaian grocery barcodes, categories and stock lists come pre-loaded.
+                          Add products with a barcode, price and stock level. Categories keep the
+                          till easy to search.
                         </p>
                       </div>
                     </div>
@@ -300,9 +290,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Smartphone className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Cash, MoMo &amp; Card Payments</h3>
+                        <h3 className="text-sm font-bold text-white">Cash, MoMo and card</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Auto change for cash, plus MTN MoMo, Telecel Cash and bank cards.
+                          Cash calculates the change automatically. MoMo and card payments go on
+                          the same receipt.
                         </p>
                       </div>
                     </div>
@@ -314,9 +305,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <BarChart3 className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Live Profit &amp; Stock Reports</h3>
+                        <h3 className="text-sm font-bold text-white">Sales and stock reports</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Track costs and margins, with automatic stock counts and shift reports.
+                          Track sales, profit and stock levels from the owner dashboard, with a
+                          shift total for each cashier.
                         </p>
                       </div>
                     </div>
@@ -328,9 +320,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                         <Coins className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Secure Per-Store Access</h3>
+                        <h3 className="text-sm font-bold text-white">Owner and cashier accounts</h3>
                         <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Each store is isolated. Cashiers can&apos;t change prices; owners see every action.
+                          You register as the owner. Cashiers get their own login and can only
+                          use the till.
                         </p>
                       </div>
                     </div>
@@ -350,7 +343,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-5 h-5 rounded-full bg-[#F28C28] text-white flex items-center justify-center text-[10px] font-bold">3</span>
-                    <span>Your workspace opens right away.</span>
+                    <span>You can sign in straight away.</span>
                   </div>
                 </div>
               </div>
@@ -656,7 +649,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
 
       {/* Footer */}
       <footer className="relative z-10 py-4 text-center text-xs text-slate-400 border-t border-slate-800/80">
-        SamTill POS SaaS • Enterprise Multi-Tenant Retail Engine • Built with real Supabase Database
+        &copy; 2026 SamTill POS
       </footer>
     </div>
   );
