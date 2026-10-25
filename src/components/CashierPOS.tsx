@@ -135,6 +135,20 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   const currentShift = activeShift || db.getActiveShift(currentTenant.id);
   const cashMovements = db.getCashMovements(currentShift?.id);
 
+  // Who is actually signed on to this till, and whether their till is open.
+  // The sidebar footer used to print a fixed placeholder name and initials
+  // regardless of the account, so every till claimed to belong to the same
+  // person — and claimed a shift was open even when none was.
+  const signedInCashier = db.getCurrentUser();
+  const cashierInitials =
+    signedInCashier?.full_name
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join('') || '?';
+
   // Filter products by search and category
   const filteredProducts = products.filter((p) => {
     const matchesSearch =
@@ -479,13 +493,23 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
 
           <div className="flex items-center gap-2.5 pt-1">
             <div className="w-8 h-8 rounded-full bg-orange-500/20 text-[#F28C28] font-black text-xs flex items-center justify-center">
-              CK
+              {cashierInitials}
             </div>
             <div className="overflow-hidden">
-              <p className="text-xs font-bold text-white truncate">Cashier Kofi</p>
-              <p className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                Shift Open • Ready
+              <p className="text-xs font-bold text-white truncate">
+                {signedInCashier?.full_name || 'Cashier'}
+              </p>
+              <p
+                className={`text-[10px] flex items-center gap-1 font-semibold ${
+                  currentShift ? 'text-emerald-400' : 'text-amber-400'
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+                    currentShift ? 'bg-emerald-400' : 'bg-amber-400'
+                  }`}
+                ></span>
+                {currentShift ? 'Shift Open • Ready' : 'No Open Shift'}
               </p>
             </div>
           </div>

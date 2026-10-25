@@ -46,6 +46,7 @@ import {
   fromUuid,
   bindMirrorId,
 } from './sync.ts';
+import { adoptCategory, adoptCustomer, adoptProduct, adoptSale } from './mirrorRows.ts';
 
 // Environment variables for real Supabase deployment
 const getEnvVar = (key: string): string => {
@@ -66,6 +67,16 @@ const ENV_SUPER_ADMIN_PASSWORD = getEnvVar('VITE_SUPER_ADMIN_PASSWORD');
 const STORAGE_KEY_CONFIG = 'samtech_supabase_config';
 const STORAGE_KEY_DATA = 'samtech_pos_database_realtime_v1';
 const STORAGE_KEY_SESSION = 'samtech_auth_session';
+
+/**
+ * How much sales history a second till adopts at sign-in.
+ *
+ * Categories, products and customers are the shop's master data and come down
+ * whole. Sales are the one unbounded table, so only the most recent receipts
+ * follow — enough to reprint what customers still ask for, without streaming
+ * years of invoices just to open a register.
+ */
+const SIGNIN_SALES_LIMIT = 500;
 
 export interface SupabaseConfig {
   url: string;
@@ -1642,6 +1653,7 @@ class DatabaseService {
         bindMirrorId(remote.id);
         bindMirrorId(remote.tenant_id);
         await this.adoptRemoteShop(remote.tenant_id);
+        await this.adoptRemoteCatalogue(remote.tenant_id);
 
         user = this.users.find((u) => u.id === remote.id);
         if (!user) {
@@ -1739,6 +1751,87 @@ class DatabaseService {
         branches.forEach((b) => bindMirrorId(b.id));
         this.branches.push(...branches);
       }
+    }
+  }
+
+  /**
+   * Pull a shop's catalogue onto a device that has never sold from it.
+   *
+   * Signing in hands a second till a shop and an account but nothing to scan:
+   * products, categories and customers are only ever written *out* of this
+   * app, and the mirror is never read back except at sign-in — so an empty
+   * till would stay empty. Fetched once here, under the same rules as
+   * {@link adoptRemoteShop}: never re-pushed, and skipped entirely when the
+   * device already holds rows for this tenant, so a till seeded locally keeps
+   * its own.
+   *
+   * Sales come too, because a till with no invoice history cannot reprint a
+   * receipt. They are the one unbounded table, so only the most recent
+   * {@link SIGNIN_SALES_LIMIT} arrive.
+   */
+  private async adoptRemoteCatalogue(tenantId?: string): Promise<void> {
+    const client = this.supabaseClient;
+    if (!client || !tenantId) return;
+
+    if (!this.categories.some((c) => c.tenant_id === tenantId)) {
+      await this.adoptRows('the categories', this.categories, adoptCategory, () =>
+        client.from('product_categories').select('*').eq('tenant_id', tenantId)
+      );
+    }
+
+    if (!this.products.some((p) => p.tenant_id === tenantId)) {
+      await this.adoptRows('the products', this.products, adoptProduct, () =>
+        client.from('products').select('*').eq('tenant_id', tenantId)
+      );
+    }
+
+    if (!this.customers.some((c) => c.tenant_id === tenantId)) {
+      await this.adoptRows('the customers', this.customers, adoptCustomer, () =>
+        client.from('customers').select('*').eq('tenant_id', tenantId)
+      );
+    }
+
+    if (!this.sales.some((s) => s.tenant_id === tenantId)) {
+      await this.adoptRows('the sales', this.sales, adoptSale, () =>
+        client
+          .from('sales')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .order('created_at', { ascending: false })
+          .limit(SIGNIN_SALES_LIMIT)
+      );
+    }
+  }
+
+  /**
+   * Store one fetched table, keeping only rows the device does not already
+   * have.
+   *
+   * Each row passes through its adopt normaliser first — the mirror is
+   * nullable in places the app's types are not — and its id is registered so
+   * a realtime event or a later re-sync lands on this row instead of adding a
+   * second copy under a freshly hashed id.
+   */
+  private async adoptRows<T extends { id: string }>(
+    label: string,
+    store: T[],
+    wrap: (raw: Record<string, unknown>) => T,
+    load: () => PromiseLike<{ data: unknown; error: { message: string } | null }>
+  ): Promise<void> {
+    const { data, error } = await load();
+    if (error) {
+      console.warn(`Remote sign-in could not load ${label}:`, error.message);
+      return;
+    }
+
+    const held = new Set(store.map((row) => row.id));
+    const rows = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
+    for (const raw of rows) {
+      const adopted = wrap(raw);
+      if (held.has(adopted.id)) continue;
+      held.add(adopted.id);
+      bindMirrorId(adopted.id);
+      store.push(adopted);
     }
   }
 

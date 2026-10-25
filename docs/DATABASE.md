@@ -14,10 +14,39 @@ UI → DatabaseService (localStorage) → src/lib/sync.ts → Supabase
 ```
 
 - The app never calls Supabase Auth, so `auth.uid()` is always `NULL`.
-- Nothing is ever read back from Supabase. If the network is down, the app
-  keeps working; the row simply isn't mirrored until the next write.
+- The **only** reads happen during sign-in (see below). Otherwise the app keeps
+  working with the network down; the row simply isn't mirrored until the next
+  write.
 - Writes are **never** awaited in the UI. A failed mirror logs a warning to the
   console and does not block or surface an error to the user.
+
+### What sign-in reads back
+
+A device that has never seen a shop would otherwise sign in to nothing. When
+`login()` finds no local match it probes the mirror for that one account, then
+**adopts** — never copies back — everything a till needs to open:
+
+| Table | Scope | Why |
+| --- | --- | --- |
+| `users` | the matched row | the account signing in |
+| `tenants`, `branches` | that shop | somewhere to open |
+| `product_categories`, `products`, `customers` | that shop, whole | what the till sells |
+| `sales` | that shop, 500 most recent | invoices to reprint |
+
+Each table is fetched once, stored without being re-pushed (the mirror already
+holds it), and skipped entirely when the device already carries rows for that
+tenant — so a till seeded locally keeps its own. Every id is registered with
+`bindMirrorId`, so a later write or a realtime event lands on the row that was
+adopted instead of minting a second copy under a freshly hashed id.
+
+Rows are normalised by `src/lib/mirrorRows.ts` on the way in: the mirror stores
+blank `sku`/`unit`/`phone` as `NULL`, and handing those straight to the till
+would throw the moment it called `product.sku.toLowerCase()`.
+
+**Not yet adopted:** `inventory_movements` and `expenses`. A stock book built
+from a partial ledger would report wrong balances, so the device that owns the
+history keeps it — Stock Book and expense reports start empty on a second
+device rather than guess.
 
 ### Why that matters for security
 
