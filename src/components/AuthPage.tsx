@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ShoppingCart,
   Lock,
   Mail,
   User,
@@ -135,12 +134,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
       >
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F28C28] flex items-center justify-center text-white shadow-lg shadow-orange-500/25">
-              <ShoppingCart className="w-6 h-6 stroke-[2.2]" />
-            </div>
+            <img
+              src="/logo.png"
+              alt="SamTill"
+              className="h-12 w-auto flex-shrink-0 rounded-xl bg-white shadow-lg shadow-black/25"
+            />
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-xl tracking-tight text-white">Samtech Helper</span>
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider bg-orange-500/20 text-[#F28C28] border border-orange-500/30 px-2 py-0.5 rounded-full">
                   Ghana Supermarket POS
                 </span>

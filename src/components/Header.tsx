@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  ShoppingCart,
   Database,
   Monitor,
   Shield,
@@ -91,14 +90,15 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-[1920px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         {/* Brand & Active Workspace Badge (No role switcher buttons) */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#F28C28] flex items-center justify-center text-white shadow-lg shadow-orange-500/30 flex-shrink-0">
-            <ShoppingCart className="w-6 h-6 stroke-[2.2]" />
-          </div>
+          {/* Main system logo. The PNG ships on its own white plate with even
+              padding, so it is rounded rather than framed against the navy bar. */}
+          <img
+            src="/logo.png"
+            alt="SamTill"
+            className="h-12 w-auto flex-shrink-0 rounded-xl bg-white shadow-lg shadow-black/25"
+          />
           <div>
-            <div className="flex items-center gap-2.5">
-              <span className="font-extrabold text-xl tracking-tight text-white">Samtech Helper</span>
-              {getRoleBadge()}
-            </div>
+            <div className="flex items-center gap-2.5">{getRoleBadge()}</div>
             <p className="text-[11px] text-slate-300 font-medium hidden md:block">
               {currentRole === 'super_admin'
                 ? 'Multi-Tenant Platform Directory & SaaS Administration'
