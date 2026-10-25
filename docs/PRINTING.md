@@ -1,6 +1,6 @@
 # Receipt Printing
 
-Samtech Helper POS prints receipts two ways, and the shop owner chooses which
+SamTill POS prints receipts two ways, and the shop owner chooses which
 one their tills use.
 
 | Method | What happens | When to use it |
@@ -60,7 +60,7 @@ npm run print-bridge
 You should see:
 
 ```
-  Samtech print bridge
+  SamTill print bridge
   Address:   http://127.0.0.1:9210
   Token:     3f2a9c...            (64 hex chars)
   Transport: auto

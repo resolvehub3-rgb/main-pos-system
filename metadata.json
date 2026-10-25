@@ -1,5 +1,5 @@
 {
-  "name": "Samtech Helper POS - Multi-Tenant Supermarket POS SaaS",
+  "name": "SamTill POS - Multi-Tenant Supermarket POS SaaS",
   "description": "Production-ready, multi-tenant supermarket and retail POS SaaS built for Ghanaian businesses with real Supabase database, live sales analytics, barcode scanning, inventory ledger, and role-based access.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

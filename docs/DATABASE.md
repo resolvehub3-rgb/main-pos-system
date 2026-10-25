@@ -1,4 +1,4 @@
-# Samtech Helper POS — Database & Sync
+# SamTill POS — Database & Sync
 
 ## Read this first: how the app and Supabase relate
 

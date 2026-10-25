@@ -263,7 +263,7 @@ Assert-Win32 ([SamtechRawPrinter]::OpenPrinter($printerName, [ref]$handle, [IntP
 try {
   for ($i = 0; $i -lt $copies; $i++) {
     $doc = New-Object SamtechRawPrinter+DOCINFO
-    $doc.pDocName     = 'Samtech POS Receipt'
+    $doc.pDocName     = 'SamTill POS Receipt'
     $doc.pOutputFile  = $null
     $doc.pDatatype    = 'RAW'
 

@@ -1,4 +1,4 @@
-# Samtech Helper POS - Ghana Payment Integrations
+# SamTill POS - Ghana Payment Integrations
 
 ## Supported Payment Rails
 1. **Cash**: Immediate cashier register handling with cash tendered and change calculation.

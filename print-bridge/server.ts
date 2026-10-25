@@ -1,5 +1,5 @@
 /**
- * Samtech Helper POS — local print bridge.
+ * SamTill POS — local print bridge.
  *
  * A tiny HTTP service that runs on the POS machine itself and writes ESC/POS
  * bytes straight to the till's thermal printer. Browsers cannot talk to USB
@@ -350,7 +350,7 @@ app.use((err: { type?: string; message?: string }, _req: Request, res: Response,
 app.listen(PORT, HOST, () => {
   const lines = [
     '',
-    '  Samtech print bridge',
+    '  SamTill print bridge',
     `  Address:   http://${HOST}:${PORT}`,
     `  Token:     ${BRIDGE_TOKEN}`,
     `  Transport: ${config.transport}`,

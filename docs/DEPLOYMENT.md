@@ -1,4 +1,4 @@
-# Samtech Helper POS - Deployment & Operations Guide
+# SamTill POS - Deployment & Operations Guide
 
 ## 1. Supabase Project Setup
 1. Create a project at [supabase.com](https://supabase.com).

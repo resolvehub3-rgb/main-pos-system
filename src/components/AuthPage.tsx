@@ -142,7 +142,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider bg-orange-500/20 text-[#F28C28] border border-orange-500/30 px-2 py-0.5 rounded-full">
-                  Ghana Supermarket POS
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">Smarter Shops. Greater Growth. 🇬🇭</p>
@@ -168,12 +167,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
             {activeTab === 'login' ? (
               /* TEXT AT LEFT SIDE FOR LOGIN PAGE */
               <div className="space-y-6">
-                {/* Brand Badge */}
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-500/10 border border-[#F28C28]/30 text-[#F28C28] text-xs font-bold uppercase tracking-wider">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Ghana Supermarket POS SaaS</span>
-                </div>
-
                 {/* Primary Heading */}
                 <div className="space-y-2">
                   <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
@@ -663,7 +656,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
 
       {/* Footer */}
       <footer className="relative z-10 py-4 text-center text-xs text-slate-400 border-t border-slate-800/80">
-        Samtech Helper POS SaaS • Enterprise Multi-Tenant Retail Engine • Built with real Supabase Database
+        SamTill POS SaaS • Enterprise Multi-Tenant Retail Engine • Built with real Supabase Database
       </footer>
     </div>
   );

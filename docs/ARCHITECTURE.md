@@ -1,7 +1,7 @@
-# Samtech Helper POS - System Architecture
+# SamTill POS - System Architecture
 
 ## Overview
-Samtech Helper POS is a production-ready, multi-tenant supermarket and retail POS SaaS tailored for Ghanaian businesses. It is built to ensure high reliability, zero data corruption at checkout, real-time analytics for owners, and multi-tenant isolation.
+SamTill POS is a production-ready, multi-tenant supermarket and retail POS SaaS tailored for Ghanaian businesses. It is built to ensure high reliability, zero data corruption at checkout, real-time analytics for owners, and multi-tenant isolation.
 
 ## Component Architecture
 1. **Frontend**: Vite + React 19 + TypeScript + Tailwind CSS

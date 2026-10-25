@@ -1,4 +1,4 @@
-# Samtech Helper POS - API & Integration Endpoints
+# SamTill POS - API & Integration Endpoints
 
 All endpoints are versioned under `/api/v1`.
 

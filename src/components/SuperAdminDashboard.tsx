@@ -388,7 +388,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           <div className="w-10 h-10 mx-auto rounded-xl bg-orange-500/20 text-[#F28C28] flex items-center justify-center mb-2">
             <Store className="w-5 h-5" />
           </div>
-          <h4 className="font-bold text-xs text-white">Samtech Helper Multi-Tenant POS</h4>
+          <h4 className="font-bold text-xs text-white">SamTill Multi-Tenant POS</h4>
           <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
             "One Platform. Multiple Shops. Endless Possibilities."
           </p>

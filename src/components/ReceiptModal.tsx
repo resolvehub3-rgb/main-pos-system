@@ -218,7 +218,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, tenant, onClos
             <div className="pt-2 text-center text-[9px] text-slate-500 border-t border-dashed border-slate-400 leading-tight">
               <p className="font-bold text-slate-700">Thank you for shopping with us!</p>
               <p className="mt-0.5">Goods sold are returnable within 48h with receipt.</p>
-              <p className="mt-1 font-semibold text-slate-400">Powered by Samtech Helper POS 🇬🇭</p>
+              <p className="mt-1 font-semibold text-slate-400">Powered by SamTill POS 🇬🇭</p>
             </div>
           </div>
         </div>

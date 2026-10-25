@@ -49,7 +49,7 @@ export const ReceiptPrinterModal: React.FC<ReceiptPrinterModalProps> = ({
   onCloseRef.current = onClose;
 
   const paperWidth = paperSize === '58mm' ? 172 : 198;
-  const storeName = (tenant.name || 'Samtech Helper').toUpperCase();
+  const storeName = (tenant.name || 'SamTill').toUpperCase();
   const items = sale.items ?? [];
   const printedItems = items.slice(0, MAX_PRINTED_ITEMS);
   const hiddenItems = items.length - printedItems.length;
@@ -259,7 +259,7 @@ export const ReceiptPrinterModal: React.FC<ReceiptPrinterModalProps> = ({
                     <p className="text-[7.5px] tracking-[0.2em] text-slate-600 mt-0.5">
                       {sale.invoice_number}
                     </p>
-                    <p className="text-[7.5px] text-slate-400 mt-0.5">Powered by Samtech Helper POS</p>
+                    <p className="text-[7.5px] text-slate-400 mt-0.5">Powered by SamTill POS</p>
                   </div>
                 </div>
               </div>

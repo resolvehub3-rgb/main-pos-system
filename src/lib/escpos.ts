@@ -315,7 +315,7 @@ export function buildReceiptBytes(
   for (const text of [
     'Thank you for shopping with us!',
     'Goods sold are returnable within 48h with receipt.',
-    'Powered by Samtech Helper POS',
+    'Powered by SamTill POS',
   ]) {
     for (const line of wrapText(text, columns)) {
       emitTextLine(emit, line, columns, { center: true });
