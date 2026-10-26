@@ -182,6 +182,15 @@ textarea {
   .collapsible {
     transition-duration: 0.01ms !important;
   }
+  /* Splash: skip the entrance/sweep (the overlay still shows, then fades) */
+  .splash-appear {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+  }
+  .splash-sweep {
+    animation: none !important;
+    background: #f28c28;
+  }
 }
 
 /* ==========================================================================
@@ -225,4 +234,45 @@ textarea {
 
 *::-webkit-scrollbar {
   display: none; /* Chromium / Electron / WebKit */
+}
+
+/* ==========================================================================
+   Splash screen (startup logo)
+   --------------------------------------------------------------------------
+   Entrance for the logo / wordmark / progress bar while the branded overlay
+   holds on screen, plus the indeterminate brand sweep. The overlay's own
+   fade-out is a Tailwind opacity transition in SplashScreen.tsx.
+   All animations are collapsed for prefers-reduced-motion (see below).
+   ========================================================================== */
+@keyframes splash-appear {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes splash-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.splash-appear {
+  animation: splash-appear 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.splash-stagger {
+  animation-delay: 180ms;
+}
+
+.splash-sweep {
+  background: linear-gradient(90deg, transparent, #f28c28, transparent);
+  animation: splash-sweep 1.1s ease-in-out infinite;
 }
