@@ -20,6 +20,9 @@ import {CustomerDisplayController} from './customerDisplay';
 import {registerIpcHandlers} from './ipc';
 import {checkForUpdates} from './updater';
 import {installAppMenu} from './menu';
+// Shared, pure predicates live in src/lib so the renderer and the main process
+// agree by construction (and so they stay unit-testable). esbuild inlines it.
+import {hasActiveSale} from '../src/lib/customerDisplay';
 
 /** Injected by esbuild; '' when no release feed was configured at build time. */
 declare const __UPDATE_MANIFEST_URL__: string;
@@ -37,6 +40,16 @@ let rendererOrigin = '';
 let cashierWindow: BrowserWindow | null = null;
 let customerDisplay: CustomerDisplayController | null = null;
 let lastUpdateStatus: import('../src/types/desktop').UpdateStatus | null = null;
+/**
+ * True once the app is on its way out (OS shutdown, session end, confirmed
+ * close). The cashier window's close guard must never block a real quit.
+ */
+let isQuitting = false;
+/**
+ * Set when the operator explicitly confirms closing the till while a sale is
+ * in progress, so the second pass of the close event isn't re-prompted.
+ */
+let closeConfirmed = false;
 const rendererErrors: string[] = [];
 const reloadAttempts = new WeakMap<BrowserWindow, number>();
 
@@ -105,6 +118,38 @@ function createCashierWindow(): BrowserWindow {
   win.once('ready-to-show', () => {
     if (!win.isDestroyed()) win.show();
   });
+
+  // Close guard for the frameless till.
+  //
+  // The renderer's Close button (and Alt+F4 / taskbar close, which funnel
+  // through this same event) must never silently discard an in-progress sale.
+  // While the till still holds unsold lines — tracked by the cashier's pushed
+  // customer-display state, the single source of truth for the projected cart
+  // — we cancel the close and ask via a native dialog. A real app quit
+  // (isQuitting) always bypasses the guard so the OS can still shut us down.
+  win.on('close', (event) => {
+    if (isQuitting || closeConfirmed) return;
+    if (!hasActiveSale(customerDisplay?.getLastState() ?? null)) return;
+
+    event.preventDefault();
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: ['Keep Selling', 'Close Anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Sale in progress',
+      message: 'A sale is still in progress.',
+      detail:
+        'This till has unsold items in the cart. Closing the window now will discard that sale. Park the cart first if you want to resume it later.',
+      noLink: true,
+    });
+
+    // Only "Close Anyway" (index 1) proceeds.
+    if (choice !== 1) return;
+    closeConfirmed = true;
+    win.close();
+  });
+
   win.on('closed', () => {
     cashierWindow = null;
   });
@@ -562,6 +607,12 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('before-quit', () => {
+    isQuitting = true;
+    // Leaving the till mid-sale is only ever a real quit here (OS shutdown,
+    // session end, confirmed close) — take the customer display down with it
+    // so a stale fullscreen customer window is never orphaned on the second
+    // monitor. `closeForShutdown` keeps the "open on start" preference intact.
+    customerDisplay?.closeForShutdown();
     void server?.close().catch(() => undefined);
   });
 

@@ -175,6 +175,19 @@ export class CustomerDisplayController {
     this.closeWindow();
   }
 
+  /**
+   * App-level shutdown close: takes the window down but does NOT clear the
+   * operator's "open on start" preference.
+   *
+   * Used when the frameless cashier window closes and the whole app is
+   * exiting. Without this the normal `close` listener would read the quit as
+   * the operator disabling the customer display, and the second monitor would
+   * silently stop reopening on the next launch.
+   */
+  closeForShutdown(): void {
+    this.closeWindow();
+  }
+
   private closeWindow(): void {
     if (!this.isOpen()) return;
     this.systemClose = true;

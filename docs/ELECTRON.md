@@ -130,6 +130,12 @@ pnpm desktop:dist
 8. Failure cases: rename `dist/` out of a dev checkout before
    `desktop:dev`/smoke → clear startup error dialog (not a blank window);
    kill the renderer → it reloads itself (max 2 attempts) with a logged error.
+9. Frameless close guard: the till has no native title bar. Start a sale
+   (add an item), then press the custom **✕** (or Alt+F4) → a native
+   "Sale in progress" prompt appears; **Keep Selling** keeps the window open
+   with the cart intact, **Close Anyway** closes the app. With an empty cart
+   the same **✕** closes immediately with no prompt, and a real OS shutdown /
+   sign-out is never blocked by the guard.
 
 Automated equivalent: `pnpm lint && pnpm test && pnpm build &&
 pnpm desktop:build && pnpm desktop:smoke` → `SMOKE RESULT: PASS`.
