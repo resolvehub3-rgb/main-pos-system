@@ -183,3 +183,46 @@ textarea {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ==========================================================================
+   Frameless desktop window — drag region
+   --------------------------------------------------------------------------
+   The Electron till runs with `frame: false`, so the OS title bar is gone.
+   The app header doubles as the drag handle (move the window by dragging it).
+   Interactive elements inside a drag region stop receiving mouse events, so
+   every control is explicitly excluded via the blanket rule below — this keeps
+   all existing buttons, links, inputs and the profile dropdown clickable.
+   These rules are inert on the web (nothing sets -webkit-app-region there).
+   ========================================================================== */
+.samtill-drag-region {
+  -webkit-app-region: drag;
+}
+
+.samtill-drag-region button,
+.samtill-drag-region a,
+.samtill-drag-region input,
+.samtill-drag-region select,
+.samtill-drag-region textarea,
+.samtill-drag-region [role='button'],
+.samtill-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* ==========================================================================
+   Hide scrollbars (app-wide)
+   --------------------------------------------------------------------------
+   The scrollable panels (super-admin, shop-owner and cashier dashboards, the
+   left nav sidebars, cart list, tables, modals …) keep scrolling exactly as
+   before via mouse wheel / trackpad / touch / keyboard — only the visible
+   scrollbar gutter is removed for a cleaner, kiosk-style POS look.
+   Covers Chromium/Electron (::-webkit-scrollbar), Firefox (scrollbar-width)
+   and legacy Edge/IE (-ms-overflow-style).
+   ========================================================================== */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge / IE */
+}
+
+*::-webkit-scrollbar {
+  display: none; /* Chromium / Electron / WebKit */
+}

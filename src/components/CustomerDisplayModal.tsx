@@ -1,18 +1,29 @@
 import React from 'react';
 import { X, ShoppingCart, Store, CheckCircle2 } from 'lucide-react';
 import { formatGHS } from '../lib/money';
-import { CartItem, Tenant } from '../types';
+import { CustomerDisplayItem } from '../types';
 
 interface CustomerDisplayModalProps {
-  tenant: Tenant;
-  cart: CartItem[];
+  /** Shop name shown in the header (customer-facing only). */
+  tenantName: string;
+  /** Projected cart lines — see src/lib/customerDisplay.ts. */
+  items: CustomerDisplayItem[];
+  /** Amount due, straight from the cashier's calculateCartTotals. */
   totalAmount: number;
   onClose: () => void;
 }
 
+/**
+ * The customer-facing screen.
+ *
+ * One component, two hosts: the in-page preview modal (browser/PWA and
+ * single-monitor desktop) and the native second-monitor window
+ * (`CustomerDisplayWindow`, Electron). It only ever receives the narrow
+ * customer projection — never internal product or tenant data.
+ */
 export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
-  tenant,
-  cart,
+  tenantName,
+  items,
   totalAmount,
   onClose,
 }) => {
@@ -25,7 +36,7 @@ export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
             <Store className="w-7 h-7" />
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight">{tenant.name}</h1>
+            <h1 className="text-2xl font-black tracking-tight">{tenantName}</h1>
             <p className="text-xs text-orange-300 font-semibold">Welcome! We appreciate your business.</p>
           </div>
         </div>
@@ -41,7 +52,7 @@ export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
 
       {/* Main Scanned Items Stream */}
       <div className="flex-1 my-6 overflow-y-auto max-w-4xl mx-auto w-full">
-        {cart.length === 0 ? (
+        {items.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-8">
             <ShoppingCart className="w-16 h-16 text-slate-600 mb-4 animate-bounce" />
             <h2 className="text-xl font-bold text-slate-300">Next Customer, Please</h2>
@@ -49,26 +60,26 @@ export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
           </div>
         ) : (
           <div className="space-y-3">
-            {cart.map((item) => (
+            {items.map((item) => (
               <div
-                key={item.product.id}
+                key={item.id}
                 className="flex items-center justify-between p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80"
               >
                 <div className="flex items-center gap-4">
                   <img
-                    src={item.product.image_url}
-                    alt={item.product.name}
+                    src={item.imageUrl}
+                    alt={item.name}
                     className="w-14 h-14 rounded-xl object-cover border border-slate-700"
                   />
                   <div>
-                    <h3 className="text-base font-bold text-white">{item.product.name}</h3>
+                    <h3 className="text-base font-bold text-white">{item.name}</h3>
                     <p className="text-xs text-slate-400">
-                      {item.quantity} x {formatGHS(item.product.selling_price)}
+                      {item.quantity} x {formatGHS(item.unitPrice)}
                     </p>
                   </div>
                 </div>
                 <span className="text-lg font-black text-[#F28C28]">
-                  {formatGHS(item.product.selling_price * item.quantity)}
+                  {formatGHS(item.unitPrice * item.quantity)}
                 </span>
               </div>
             ))}

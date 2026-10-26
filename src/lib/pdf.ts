@@ -374,7 +374,6 @@ export function buildPrintHtml(opts: PdfReportOptions): string {
     <tbody>${body}</tbody>
   </table>
   ${opts.footer ? `<div class="footer">${htmlEscape(opts.footer)}</div>` : ''}
-  <script>window.onload = function () { setTimeout(function () { window.print(); }, 250); };</script>
 </body>
 </html>`;
 }
@@ -382,6 +381,13 @@ export function buildPrintHtml(opts: PdfReportOptions): string {
 /**
  * Open the report in a dedicated window and invoke the browser print dialog
  * (user can print or "Save as PDF").
+ *
+ * The print trigger lives here, in the opener, rather than in an inline
+ * `<script>` inside the popup document: the popup inherits this page's
+ * Content-Security-Policy (`script-src 'self'`), which would block an inline
+ * script in the desktop app — while this file's own script always runs. The
+ * user-visible behaviour (report window opens, then the print dialog after the
+ * page settles) is unchanged.
  */
 export function printReport(opts: PdfReportOptions): void {
   const win = window.open('', '_blank', 'width=1200,height=800');
@@ -392,4 +398,17 @@ export function printReport(opts: PdfReportOptions): void {
   win.document.open();
   win.document.write(buildPrintHtml(opts));
   win.document.close();
+
+  let printScheduled = false;
+  const triggerPrint = (): void => {
+    if (printScheduled || win.closed) return;
+    printScheduled = true;
+    // Same 250 ms settle delay the old inline script used.
+    setTimeout(() => {
+      if (!win.closed) win.print();
+    }, 250);
+  };
+  win.onload = triggerPrint;
+  // Safety net in case the popup's load event fired before onload was attached.
+  setTimeout(triggerPrint, 2_000);
 }

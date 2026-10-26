@@ -14,6 +14,8 @@ import {
   Phone,
 } from 'lucide-react';
 import { UserRole, UserAccount } from '../types';
+import { WindowControls } from './WindowControls';
+import { isDesktop, toggleMaximizeWindow } from '../lib/desktopBridge';
 
 interface HeaderProps {
   currentUser: UserAccount;
@@ -38,6 +40,17 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [profileOpen, setProfileOpen] = useState<boolean>(false);
   const profileRef = useRef<HTMLDivElement>(null);
+
+  // Desktop (frameless) chrome: the header is the window's drag handle and
+  // hosts the min/max/close controls. On the web nothing here changes.
+  const desktop = isDesktop();
+  const handleHeaderDoubleClick = (event: React.MouseEvent) => {
+    if (!desktop) return;
+    // Only the empty header background maximizes; double-clicking a control
+    // (or anything interactive) must not.
+    if ((event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
+    toggleMaximizeWindow();
+  };
 
   // Close profile dropdown when clicking outside
   useEffect(() => {
@@ -86,7 +99,12 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-[#102A4C] text-white border-b border-slate-700/60 shadow-md">
+    <header
+      className={`sticky top-0 z-40 bg-[#102A4C] text-white border-b border-slate-700/60 shadow-md${
+        desktop ? ' samtill-drag-region' : ''
+      }`}
+      onDoubleClick={handleHeaderDoubleClick}
+    >
       <div className="max-w-[1920px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         {/* Brand & Active Workspace Badge (No role switcher buttons) */}
         <div className="flex items-center gap-3">
@@ -271,6 +289,9 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
           </div>
+
+          {/* Frameless window controls (minimize / maximize / close) — desktop only */}
+          {desktop && <WindowControls />}
         </div>
       </div>
     </header>

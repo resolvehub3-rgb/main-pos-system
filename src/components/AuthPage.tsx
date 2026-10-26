@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { UserAccount } from '../types';
 import { db } from '../lib/supabaseClient';
+import { WindowControls } from './WindowControls';
+import { isDesktop, toggleMaximizeWindow } from '../lib/desktopBridge';
 
 interface AuthPageProps {
   onLoginSuccess: (user: UserAccount) => void;
@@ -38,6 +40,15 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Desktop (frameless) chrome: the brand bar doubles as the window's drag
+  // handle and hosts the min/max/close controls. Inert on the web.
+  const desktop = isDesktop();
+  const handleHeaderDoubleClick = (event: React.MouseEvent) => {
+    if (!desktop) return;
+    if ((event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
+    toggleMaximizeWindow();
+  };
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState<string>('');
@@ -127,9 +138,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
 
       {/* Top Brand Bar */}
       <header
-        className={`sticky top-0 z-30 border-b border-slate-800/80 bg-[#102A4C]/70 backdrop-blur-md px-6 py-4 transition-shadow duration-300 ${
-          scrolled ? 'shadow-lg shadow-black/30' : ''
-        }`}
+        className={`sticky top-0 z-30 border-b border-slate-800/80 bg-[#102A4C]/70 backdrop-blur-md px-6 py-4 transition-shadow duration-300${
+          scrolled ? ' shadow-lg shadow-black/30' : ''
+        }${desktop ? ' samtill-drag-region' : ''}`}
+        onDoubleClick={handleHeaderDoubleClick}
       >
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -146,6 +158,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>Works online and offline</span>
+            {desktop && <WindowControls />}
           </div>
         </div>
       </header>

@@ -5,12 +5,20 @@ import { ShopOwnerDashboard } from './components/ShopOwnerDashboard';
 import { CashierPOS } from './components/CashierPOS';
 import { ReceiptModal } from './components/ReceiptModal';
 import { CustomerDisplayModal } from './components/CustomerDisplayModal';
+import { UpdateNotice } from './components/UpdateNotice';
 import { AddProductModal } from './components/AddProductModal';
 import { SupabaseConfigModal } from './components/SupabaseConfigModal';
 import { AuthPage } from './components/AuthPage';
 import { db } from './lib/supabaseClient';
 import { UserAccount, CartItem, Sale, Product, Tenant } from './types';
 import { calculateCartTotals } from './lib/money';
+import { buildCustomerDisplayState, cartToCustomerItems } from './lib/customerDisplay';
+import {
+  isDesktop,
+  onCustomerDisplayOpened,
+  openNativeCustomerDisplay,
+  pushCustomerDisplayState,
+} from './lib/desktopBridge';
 import { ArrowLeft, Store } from 'lucide-react';
 
 export default function App() {
@@ -71,6 +79,38 @@ export default function App() {
   const activeShift = db.getActiveShift(currentTenant.id);
   const supabaseConfig = db.getConfig();
 
+  // Cart totals for the customer display (same calculation the checkout panel
+  // uses). Computed before the auth gate so the desktop push below always has
+  // the current amount due.
+  const cartTotals = calculateCartTotals(
+    cart.map((c) => ({
+      price: c.product.selling_price,
+      quantity: c.quantity,
+      discountPercent: c.discount_percent,
+    }))
+  );
+
+  // Desktop: the cashier window is the single source of truth for the cart.
+  // Push every change (scan, quantity change, removal, clear, completed sale)
+  // to the native customer display window. Logged out → clear the customer
+  // screen. No-op in the browser/PWA.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    pushCustomerDisplayState(
+      currentUser
+        ? buildCustomerDisplayState(currentTenant.name, cart, cartTotals.total)
+        : buildCustomerDisplayState('', [], 0),
+    );
+  }, [cart, cartTotals.total, currentTenant.name, currentUser]);
+
+  // When the native customer display window opens (opened at startup, or a
+  // monitor was just plugged in), close the in-page preview if it is showing
+  // so the two never appear at once.
+  useEffect(() => {
+    if (!isDesktop()) return;
+    return onCustomerDisplayOpened(() => setShowCustomerDisplay(false));
+  }, []);
+
   // Handle atomic sale completion
   const handleCompleteSale = (saleData: {
     payment_method: Sale['payment_method'];
@@ -101,6 +141,19 @@ export default function App() {
     setShopOwnerViewingPOS(false);
   };
 
+  // Open the customer screen. Desktop: open/focus the native second-monitor
+  // window; when no suitable second display exists (or on the web) fall back
+  // to the existing in-page preview modal — same control, same intent.
+  const openCustomerDisplay = (): void => {
+    if (!isDesktop()) {
+      setShowCustomerDisplay(true);
+      return;
+    }
+    void openNativeCustomerDisplay().then((result) => {
+      if (!result?.opened) setShowCustomerDisplay(true);
+    });
+  };
+
   // If user is not authenticated, show the Login and Register page
   if (!currentUser) {
     return (
@@ -115,15 +168,6 @@ export default function App() {
     );
   }
 
-  // Cart totals for customer display
-  const cartTotals = calculateCartTotals(
-    cart.map((c) => ({
-      price: c.product.selling_price,
-      quantity: c.quantity,
-      discountPercent: c.discount_percent,
-    }))
-  );
-
   return (
     <div className="min-h-screen bg-[#F5F7FA] flex flex-col text-slate-800 antialiased font-['Montserrat',sans-serif]">
       {/* Header with User Profile Menu & Logout (no role switcher buttons) */}
@@ -133,10 +177,13 @@ export default function App() {
         selectedShop={selectedShopId}
         onShopChange={setSelectedShopId}
         onOpenSupabaseModal={() => setShowSupabaseModal(true)}
-        onOpenCustomerDisplay={() => setShowCustomerDisplay(true)}
+        onOpenCustomerDisplay={openCustomerDisplay}
         isConnectedToSupabase={supabaseConfig.isConnected}
         onLogout={handleLogout}
       />
+
+      {/* Desktop update availability (never interrupts a sale) */}
+      <UpdateNotice />
 
       {/* Owner previewing POS indicator banner */}
       {currentUser.role === 'shop_owner' && shopOwnerViewingPOS && (
@@ -180,7 +227,7 @@ export default function App() {
               onPrintLastReceipt={(sale, opts) =>
                 setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
               }
-              onOpenCustomerDisplay={() => setShowCustomerDisplay(true)}
+              onOpenCustomerDisplay={openCustomerDisplay}
               cart={cart}
               setCart={setCart}
             />
@@ -204,7 +251,7 @@ export default function App() {
             onPrintLastReceipt={(sale, opts) =>
               setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
             }
-            onOpenCustomerDisplay={() => setShowCustomerDisplay(true)}
+            onOpenCustomerDisplay={openCustomerDisplay}
             cart={cart}
             setCart={setCart}
           />
@@ -221,11 +268,11 @@ export default function App() {
         />
       )}
 
-      {/* Customer-Facing Dual Screen Display */}
+      {/* Customer-Facing Dual Screen Display (browser preview & single-monitor fallback) */}
       {showCustomerDisplay && (
         <CustomerDisplayModal
-          tenant={currentTenant}
-          cart={cart}
+          tenantName={currentTenant.name}
+          items={cartToCustomerItems(cart)}
           totalAmount={cartTotals.total}
           onClose={() => setShowCustomerDisplay(false)}
         />

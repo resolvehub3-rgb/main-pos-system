@@ -73,6 +73,20 @@ test('print html includes title, meta, table, footer', () => {
   assert.ok(html.includes('display: table-header-group'))
 })
 
+test('print html carries no inline script (the popup inherits our CSP)', () => {
+  // The report popup inherits `script-src 'self'`, so an inline <script>
+  // would be blocked in the desktop app; printReport() triggers print from
+  // the opener instead.
+  const html = buildPrintHtml({
+    title: 'My Report',
+    metadata: [],
+    columns: [{ header: 'Item', width: 1 }],
+    rows: [['Soap']],
+  })
+  assert.ok(!html.includes('<script'))
+  assert.ok(!html.toLowerCase().includes('onload'))
+})
+
 test('textWidth estimates proportional widths', () => {
   assert.ok(textWidth('MMMMMM', 10) > textWidth('iiiiii', 10))
   assert.equal(textWidth('', 10), 0)
