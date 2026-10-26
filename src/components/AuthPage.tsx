@@ -11,11 +11,6 @@ import {
   Building,
   MapPin,
   KeyRound,
-  CheckCircle2,
-  Zap,
-  BarChart3,
-  Smartphone,
-  Coins,
 } from 'lucide-react';
 import { UserAccount } from '../types';
 import { db } from '../lib/supabaseClient';
@@ -163,211 +158,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
         </div>
       </header>
 
-      {/* Main Authentication Section: TEXT AT LEFT SIDE, FORM AT RIGHT SIDE */}
+      {/* Main Authentication Section: the auth form (Sign In / Register) */}
       <main className="relative z-10 flex-1 flex items-center justify-center p-4 sm:p-6 md:p-8 lg:p-12 my-2">
-        <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-stretch">
+        <div className="w-full max-w-2xl mx-auto">
           
           {/* ======================================================== */}
-          {/* LEFT SIDE: RICH INFORMATIVE TEXT & BRANDING PRESENTATION */}
+          {/* THE INTERACTIVE AUTH FORM (Sign In / Register) */}
           {/* ======================================================== */}
-          <div className="lg:col-span-5 flex flex-col justify-center space-y-6">
-            
-            {activeTab === 'login' ? (
-              /* TEXT AT LEFT SIDE FOR LOGIN PAGE */
-              <div className="space-y-6">
-                {/* Primary Heading */}
-                <div className="space-y-2">
-                  <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-                    Supermarket POS for Ghana
-                  </h2>
-                  <p className="text-sm sm:text-base text-slate-300 font-medium leading-relaxed">
-                    Scan items, take cash, MoMo or card, and print the receipt at the till.
-                  </p>
-                </div>
-
-                {/* Feature Highlights */}
-                <div className="space-y-3.5 pt-2">
-                  <div className="p-4 rounded-2xl bg-[#102A4C]/80 border border-slate-700/70 hover:border-orange-500/50 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-[#F28C28] flex items-center justify-center font-bold flex-shrink-0 mt-0.5">
-                        <Zap className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Barcode checkout</h3>
-                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Scan a barcode or type a SKU and the item lands in the cart with its price.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-[#102A4C]/80 border border-slate-700/70 hover:border-emerald-500/50 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold flex-shrink-0 mt-0.5">
-                        <Smartphone className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Cash, MoMo and card</h3>
-                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Cash counts the change for you. MTN MoMo, Telecel Cash and card are
-                          recorded against the same sale.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-[#102A4C]/80 border border-slate-700/70 hover:border-blue-500/50 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold flex-shrink-0 mt-0.5">
-                        <BarChart3 className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Stock and sales reports</h3>
-                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Stock drops with every sale. Low-stock alerts, daily sales and shift
-                          totals sit in the owner dashboard.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-[#102A4C]/80 border border-slate-700/70 hover:border-indigo-500/50 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold flex-shrink-0 mt-0.5">
-                        <Coins className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Owner and cashier logins</h3>
-                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Each shop signs in separately. Cashiers use the till; owners see sales,
-                          stock and staff.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Key Pillars Checklist */}
-                <div className="pt-2 grid grid-cols-2 gap-3 text-xs text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>Prices in Ghana cedis</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>MTN MoMo and Telecel Cash</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>Saved to the cloud</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-[#F28C28] flex-shrink-0" />
-                    <span>Thermal receipt printing</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* TEXT AT LEFT SIDE FOR REGISTER PAGE (Without 'Onboard in Under 2 Minutes') */
-              <div className="space-y-6">
-                {/* Primary Heading */}
-                <div className="space-y-2">
-                  <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-                    Set up your supermarket
-                  </h2>
-                  <p className="text-sm sm:text-base text-slate-300 font-medium leading-relaxed">
-                    Add your shop details, then add products and cashier accounts as you go.
-                  </p>
-                </div>
-
-                {/* Feature Grid */}
-                <div className="space-y-3.5 pt-2">
-                  <div className="p-4 rounded-2xl bg-[#102A4C]/80 border border-slate-700/70 hover:border-orange-500/50 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-[#F28C28] flex items-center justify-center font-bold flex-shrink-0 mt-0.5">
-                        <Zap className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Build your product list</h3>
-                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Add products with a barcode, price and stock level. Categories keep the
-                          till easy to search.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-[#102A4C]/80 border border-slate-700/70 hover:border-emerald-500/50 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold flex-shrink-0 mt-0.5">
-                        <Smartphone className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Cash, MoMo and card</h3>
-                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Cash calculates the change automatically. MoMo and card payments go on
-                          the same receipt.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-[#102A4C]/80 border border-slate-700/70 hover:border-blue-500/50 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold flex-shrink-0 mt-0.5">
-                        <BarChart3 className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Sales and stock reports</h3>
-                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          Track sales, profit and stock levels from the owner dashboard, with a
-                          shift total for each cashier.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-[#102A4C]/80 border border-slate-700/70 hover:border-indigo-500/50 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold flex-shrink-0 mt-0.5">
-                        <Coins className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-white">Owner and cashier accounts</h3>
-                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                          You register as the owner. Cashiers get their own login and can only
-                          use the till.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Registration Checklist */}
-                <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 space-y-2">
-                  <div className="font-bold text-white text-xs">Getting Started:</div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-[#F28C28] text-white flex items-center justify-center text-[10px] font-bold">1</span>
-                    <span>Enter your store name and address.</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-[#F28C28] text-white flex items-center justify-center text-[10px] font-bold">2</span>
-                    <span>Add your owner details and PIN.</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-[#F28C28] text-white flex items-center justify-center text-[10px] font-bold">3</span>
-                    <span>You can sign in straight away.</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-          </div>
-
-          {/* ======================================================== */}
-          {/* RIGHT SIDE: THE INTERACTIVE AUTH FORM (Sign In / Register) */}
-          {/* ======================================================== */}
-          <div className="lg:col-span-7 flex flex-col justify-center">
+          <div className="flex flex-col justify-center">
             <div className="w-full bg-white text-slate-900 rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col">
               
               {/* Form Top Switcher & Header */}
@@ -429,7 +227,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                   </div>
                 )}
 
-                {/* ===================== SIGN IN VIEW (RIGHT FORM) ===================== */}
+                {/* ===================== SIGN IN VIEW ===================== */}
                 {activeTab === 'login' ? (
                   <div>
                     {/* Standard Credential Form (1-Click role login & pre-configured accounts removed) */}
@@ -501,7 +299,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                     </div>
                   </div>
                 ) : (
-                  /* ===================== REGISTRATION VIEW (RIGHT FORM) ===================== */
+                  /* ===================== REGISTRATION VIEW ===================== */
                   /* (Account role selector removed - registers direct store workspace) */
                   <form onSubmit={handleRegisterSubmit} className="space-y-4">
                     {/* Supermarket Store Information */}
