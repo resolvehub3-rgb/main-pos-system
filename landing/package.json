@@ -1,0 +1,26 @@
+{
+  "name": "samtill-landing",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Public marketing website for SamTill by SamTeck Digital. Static site only - no backend, no database, no payments.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port=5174",
+    "build": "vite build",
+    "preview": "vite preview --port=4173",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  }
+}

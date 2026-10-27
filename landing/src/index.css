@@ -1,0 +1,78 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans:
+    'Montserrat', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Brand palette — deep navy, white, orange accent. */
+  --color-navy-50: #eef3fa;
+  --color-navy-100: #d7e2f2;
+  --color-navy-200: #b0c4e3;
+  --color-navy-300: #7d9bc9;
+  --color-navy-400: #4d6ea8;
+  --color-navy-500: #2f5088;
+  --color-navy-600: #1d3a68;
+  --color-navy-700: #142c50;
+  --color-navy-800: #0e2340;
+  --color-navy-900: #0b1f3a;
+  --color-navy-950: #071527;
+
+  --color-amber-accent: #f97316;
+  --color-amber-50: #fff5ed;
+  --color-amber-100: #ffead1;
+  --color-amber-200: #fed4a3;
+  --color-amber-300: #fdb56b;
+  --color-amber-400: #fb923c;
+  --color-amber-500: #f97316;
+  --color-amber-600: #ea5f0a;
+  --color-amber-700: #c2460b;
+  --color-amber-800: #9a3910;
+  --color-amber-900: #7c3110;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-navy-900);
+  background-color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle scroll-reveal. Degrades to fully visible without JavaScript motion. */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s ease;
+}
+
+.reveal.reveal-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Visible, accessible focus ring on every interactive element. */
+:focus-visible {
+  outline: 3px solid var(--color-amber-500);
+  outline-offset: 2px;
+  border-radius: 2px;
+}

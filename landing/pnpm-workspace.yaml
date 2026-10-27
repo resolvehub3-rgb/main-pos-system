@@ -1,0 +1,5 @@
+# This file makes `landing/` its own pnpm workspace root, so pnpm never walks
+# up to the repository root and installs the SamTill POS application's
+# dependencies by mistake. The landing site must remain fully standalone.
+packages:
+  - '.'
