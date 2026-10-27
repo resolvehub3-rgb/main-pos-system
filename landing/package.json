@@ -2,13 +2,14 @@
   "name": "samtill-landing",
   "private": true,
   "version": "0.1.0",
-  "description": "Public marketing website for SamTill by SamTeck Digital. Static site only - no backend, no database, no payments.",
+  "description": "Public marketing website for SamTill by SamTeck Digital, plus the prepared-but-disabled commerce API (accounts, Paystack test-mode checkout, installer downloads). No live backend: every commerce endpoint fails closed until approved and provisioned.",
   "type": "module",
   "scripts": {
     "dev": "vite --port=5174",
     "build": "vite build",
     "preview": "vite preview --port=4173",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node tests/run.ts"
   },
   "dependencies": {
     "react": "^19.0.1",

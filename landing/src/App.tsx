@@ -1,4 +1,5 @@
 import Comparison from './components/Comparison';
+import CommercePreview from './components/CommercePreview';
 import Contact from './components/Contact';
 import Faq from './components/Faq';
 import Features from './components/Features';
@@ -36,6 +37,7 @@ export default function App() {
         <Comparison />
         <HowItWorks />
         <Faq />
+        <CommercePreview />
         <Contact />
       </main>
 

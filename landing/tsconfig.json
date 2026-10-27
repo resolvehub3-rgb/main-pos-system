@@ -10,7 +10,11 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "forceConsistentCasingInFileNames": true,
+    // Allows explicit "./module.ts" imports, used by api/ and tests/ so the
+    // exact same files type-check here and run under Node (native TS) and
+    // Vercel's bundler without a compile step. Requires noEmit (set above).
+    "allowImportingTsExtensions": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "api", "tests", "vite.config.ts"]
 }

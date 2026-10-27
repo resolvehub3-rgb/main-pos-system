@@ -1,8 +1,11 @@
 # SamTill Marketing Website
 
-Public marketing/landing website for **SamTill by SamTeck Digital**.
+Public marketing/landing website for **SamTill by SamTeck Digital**, plus the
+**prepared-but-disabled commerce system** (accounts, Paystack test-mode
+checkout, subscription-gated installer downloads) that lives entirely inside
+this folder as reviewable code.
 
-This folder is a **standalone static site**. It is completely separate from the
+This folder is a **standalone workspace**. It is completely separate from the
 SamTill POS application in the repository root.
 
 ## Isolation guarantees
@@ -11,9 +14,35 @@ SamTill POS application in the repository root.
   sharing with the POS app.
 - Build output goes to `landing/dist` and never touches the root `dist/`,
   `dist-electron/`, `release/` or the Electron packaging config.
-- No Supabase client, no `.env` usage, no database, no backend, no API keys.
+- No Supabase client, no `.env` usage, no database, **no provisioned backend,
+  no API keys** — the commerce API in `api/` is written against the browser
+  WebCrypto/fetch APIs and fails closed (HTTP 503) until an owner-approved
+  commerce project and its environment variables exist (nothing is set, and
+  no secrets are stored in this repo, ever).
+- The POS app, its Supabase project and its `.env` are never read, copied or
+  modified from here; the commerce system is designed for its own future,
+  separate Supabase project.
 - Nothing in the POS source tree is imported or modified by this site.
 - Runs on its own port (`pnpm dev` → 5174), clear of the POS dev server (3000).
+
+## Commerce preparation (review only — nothing is live)
+
+| Piece | Location | State |
+| --- | --- | --- |
+| Commercial decisions blocking launch | `docs/01-commercial-decisions.md` | **unresolved** — checkout cannot be enabled |
+| Architecture & test report | `docs/02-commerce-architecture.md` | prepared |
+| Environment variable names (no values) | `docs/03-environment-variables.md` | prepared; none set anywhere |
+| Installer delivery & licensing | `docs/04-installer-delivery-and-licensing.md` | prepared; installer never uploaded |
+| API handlers (status/plans/checkout/verify/subscription/download/webhook) | `api/` | implemented, fail-closed, unit-tested |
+| Database schema + RLS | `db/migrations/0001_commerce_init.sql` | prepared, **never executed** |
+| Unit tests | `tests/` | 68 tests, no network/database |
+| Site preview section (inert) | `src/components/CommercePreview.tsx`, `src/config/commerce.ts` | all capability flags `false` |
+
+There is no checkout button, no working download and no registration form on
+the site: the preview section shows status rows only. Prices remain flagged
+as drafts (`PRICING_APPROVED = false`), and the API independently refuses
+checkout (`CHECKOUT_ENABLED` unset) — the site cannot enable payments on its
+own.
 
 ## Development
 
@@ -27,8 +56,9 @@ pnpm dev         # http://localhost:5174
 
 ```bash
 cd landing
-pnpm lint        # TypeScript type check
-pnpm build       # production build → landing/dist
+pnpm lint        # TypeScript type check (src, api and tests)
+pnpm test        # commerce unit tests — no network, no database
+pnpm build       # production build → landing/dist (api/ is never bundled)
 pnpm preview     # serve the production build locally (http://localhost:4173)
 ```
 
