@@ -17,8 +17,10 @@ import RegisterPage from './pages/RegisterPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import AccountPage from './pages/AccountPage';
+import CheckoutPage from './pages/CheckoutPage';
 import {SITE} from './config/site';
 import {isAccountRoute, type AccountRoute, type ParsedRoute} from './lib/hashRoute';
+import {navigateTo} from './lib/navigation';
 import {useHashRoute} from './lib/useHashRoute';
 
 /**
@@ -27,8 +29,13 @@ import {useHashRoute} from './lib/useHashRoute';
  * Marketing sections render for the home route and for plain section anchors
  * (`#features`, `#contact`, …). Hash routes that start with `#/` switch to
  * the customer account screens (register / verify / sign in / account /
- * download) without any server rewrite rules, so the static build keeps
- * working on any host.
+ * download / checkout) without any server rewrite rules, so the static build
+ * keeps working on any host.
+ *
+ * Paystack returns from its hosted page to `/?checkout=return&reference=…`
+ * (a real query string, because the origin is fixed in APP_BASE_URL). That
+ * is folded into the `#/checkout?reference=…` route below so the confirmation
+ * screen owns the flow and a page refresh keeps working.
  */
 
 function renderAccountScreen(route: ParsedRoute & {path: AccountRoute}) {
@@ -47,6 +54,8 @@ function renderAccountScreen(route: ParsedRoute & {path: AccountRoute}) {
       return <AccountPage />;
     case '/download':
       return <DownloadPage />;
+    case '/checkout':
+      return <CheckoutPage />;
   }
 }
 
@@ -58,6 +67,18 @@ export default function App() {
   useEffect(() => {
     if (accountScreen) window.scrollTo({top: 0});
   }, [accountScreen?.path]);
+
+  // Fold Paystack's return URL into the checkout route. replaceState keeps
+  // the query string out of the address bar so a refresh does not restart
+  // verification with a stale reference.
+  useEffect(() => {
+    if (route.path !== '/') return;
+    if (route.params.get('checkout') !== 'return') return;
+    const reference = route.params.get('reference');
+    if (!reference) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    navigateTo(`/checkout?reference=${encodeURIComponent(reference)}`);
+  }, [route]);
 
   return (
     <>

@@ -1,11 +1,58 @@
+import {useEffect, useState} from 'react';
+import {COMMERCE} from '../config/commerce';
 import {LICENCE_TERMS, PACKAGES, PRICING_APPROVED} from '../config/pricing';
+import {checkoutAvailability} from '../lib/availability';
+import {fetchPublishedPlans, formatMinorAmount, type PublishedPlan} from '../lib/checkoutClient';
+import {readCommerceEnv} from '../lib/commerceClient';
 import {Reveal} from './Reveal';
 
 function formatPrice(price: number): string {
   return price.toLocaleString('en-GH');
 }
 
+/**
+ * Price source: the server-published plan list wins whenever it loads, so the
+ * site never advertises a number the checkout would not charge. Until then
+ * (or while payments are switched off) the approved copy price is shown and
+ * the call to action stays "Enquire" — no buy button appears without a
+ * matching active plan row behind it.
+ */
+function usePublishedPlans(enabled: boolean) {
+  const [published, setPublished] = useState<Record<string, PublishedPlan> | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const apiBase = readCommerceEnv().apiBase;
+    let active = true;
+    void fetchPublishedPlans({apiBase}).then((result) => {
+      if (!active || !result.ok) return;
+      const byCode: Record<string, PublishedPlan> = {};
+      for (const plan of result.plans) byCode[plan.code] = plan;
+      setPublished(byCode);
+    });
+    return () => {
+      active = false;
+    };
+  }, [enabled]);
+
+  return published;
+}
+
 export default function Pricing() {
+  const checkout = checkoutAvailability(COMMERCE, readCommerceEnv());
+  const published = usePublishedPlans(checkout.available);
+
+  /** Server price when published, otherwise the approved copy price. */
+  const displayPrice = (code: string, fallbackCurrency: string, fallbackPrice: number): string => {
+    const plan = published?.[code];
+    return plan
+      ? formatMinorAmount(plan.amountMinor, plan.currency)
+      : `${fallbackCurrency}${formatPrice(fallbackPrice)}`;
+  };
+
+  /** A buy button exists only when checkout is open AND that plan is live. */
+  const canBuy = (code: string): boolean => checkout.available && Boolean(published?.[code]);
+
   return (
     <section id="pricing" className="bg-slate-50 py-20 lg:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -77,8 +124,7 @@ export default function Pricing() {
 
                 <p className="mt-4 flex items-baseline gap-2">
                   <span className="text-4xl font-extrabold tracking-tight text-navy-900">
-                    {pkg.currency}
-                    {formatPrice(pkg.price)}
+                    {displayPrice(pkg.id, pkg.currency, pkg.price)}
                   </span>
                 </p>
                 <p className="mt-1 text-sm font-semibold text-slate-500">
@@ -120,15 +166,20 @@ export default function Pricing() {
                 )}
 
                 <a
-                  href="#contact"
+                  href={canBuy(pkg.id) ? `#/checkout?plan=${pkg.id}` : '#contact'}
                   className={`mt-8 inline-flex items-center justify-center rounded-full px-6 py-3.5 text-sm font-bold transition-colors ${
                     pkg.highlighted
                       ? 'bg-amber-700 text-white hover:bg-amber-800'
                       : 'border-2 border-navy-900 text-navy-900 hover:border-amber-500 hover:text-amber-700'
                   }`}
                 >
-                  Enquire about {pkg.name}
+                  {canBuy(pkg.id) ? `Buy ${pkg.name}` : `Enquire about ${pkg.name}`}
                 </a>
+                {canBuy(pkg.id) && (
+                  <p className="mt-2 text-center text-xs text-slate-500">
+                    Pay securely with mobile money or card
+                  </p>
+                )}
               </div>
             </Reveal>
           ))}

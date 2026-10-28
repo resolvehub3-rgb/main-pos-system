@@ -1,31 +1,58 @@
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import AccountShell from '../components/account/AccountShell';
 import GateNotice from '../components/account/GateNotice';
 import StatusBanner, {type BannerTone} from '../components/account/StatusBanner';
 import {COMMERCE} from '../config/commerce';
-import {accountAvailability, downloadAvailability} from '../lib/availability';
+import {PACKAGES} from '../config/pricing';
+import {accountAvailability, checkoutAvailability, downloadAvailability} from '../lib/availability';
 import {resendConfirmation} from '../lib/authFlow';
 import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
+import {fetchMyAccess, type AccessResult} from '../lib/checkoutClient';
 import {navigateTo} from '../lib/navigation';
 import {createAuthProvider} from '../lib/supabaseAdapter';
 import {useAccountSession} from '../lib/useAccountSession';
 
 /**
  * Signed-in customer account screen: identity, email-verification status,
- * entry point to the installer download and sign-out.
+ * the licence this account holds, entry point to the installer download and
+ * sign-out.
  *
  * Verification status is read from the session the provider returned — the
  * screen never states that an address is verified unless the provider says
- * so (`email_confirmed_at` present). Creating an account is explicitly not a
- * POS licence activation.
+ * so (`email_confirmed_at` present). Licence state comes from the server's
+ * own GET /api/subscription answer, never from anything the browser computed.
  */
+
+function planLabel(planCode: string | null): string {
+  const match = planCode ? PACKAGES.find((pkg) => pkg.id === planCode) : undefined;
+  return match ? match.name : planCode ?? 'SamTill licence';
+}
 
 export default function AccountPage() {
   const availability = accountAvailability(COMMERCE, readCommerceEnv());
+  const checkout = checkoutAvailability(COMMERCE, readCommerceEnv());
   const download = downloadAvailability(COMMERCE, readCommerceEnv());
   const {loading, account, session, signOut} = useAccountSession();
   const [banner, setBanner] = useState<{tone: BannerTone; message: string} | null>(null);
   const [resending, setResending] = useState(false);
+  const [access, setAccess] = useState<AccessResult | null>(null);
+
+  const accessToken = account?.accessToken ?? '';
+  const apiBase = readCommerceEnv().apiBase;
+
+  useEffect(() => {
+    if (!accessToken) {
+      setAccess(null);
+      return;
+    }
+    let active = true;
+    void fetchMyAccess({apiBase, accessToken}).then((result) => {
+      if (active) setAccess(result);
+    });
+    return () => {
+      active = false;
+    };
+  }, [accessToken, apiBase]);
 
   if (!availability.available) {
     return (
@@ -131,6 +158,89 @@ export default function AccountPage() {
           >
             {resending ? 'Sending…' : 'Resend confirmation email'}
           </button>
+        </div>
+      )}
+
+      {access?.ok && (access.entitlements.length > 0 || checkout.available) && (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
+          <h2 className="text-sm font-bold text-navy-900">Your SamTill licence</h2>
+          {access.entitlements.length === 0 ? (
+            <>
+              <p className="mt-1 text-sm text-navy-700">
+                This account does not have a licence yet. Choose a package to buy one — your
+                licence and downloads appear here as soon as payment is confirmed.
+              </p>
+              {checkout.available ? (
+                <button
+                  type="button"
+                  onClick={() => navigateTo('/checkout')}
+                  className="mt-3 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
+                >
+                  Choose a package →
+                </button>
+              ) : (
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  Packages are listed on the website; contact SamTeck Digital to purchase.
+                </p>
+              )}
+            </>
+          ) : (
+            <ul className="mt-3 space-y-4">
+              {access.entitlements.map((entitlement) => {
+                const now = Date.now();
+                const withinWindow =
+                  entitlement.status === 'active' && Date.parse(entitlement.validTo) > now;
+                const badge = withinWindow
+                  ? {label: 'Active', classes: 'bg-emerald-100 text-emerald-800'}
+                  : entitlement.status === 'revoked'
+                    ? {label: 'Revoked', classes: 'bg-red-100 text-red-800'}
+                    : {label: 'Expired', classes: 'bg-slate-200 text-slate-700'};
+                return (
+                  <li key={`${entitlement.planCode ?? entitlement.productCode}-${entitlement.validTo}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm font-bold text-navy-900">
+                        {planLabel(entitlement.planCode)}
+                      </span>
+                      <span
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${badge.classes}`}
+                      >
+                        {badge.label}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {withinWindow
+                        ? 'Downloads and included support run until '
+                        : entitlement.status === 'revoked'
+                          ? 'Access was revoked on '
+                          : 'Included access ended on '}
+                      {new Date(entitlement.validTo).toLocaleDateString('en-GH', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                      })}
+                      .
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {access.ok &&
+            access.entitlements.length > 0 &&
+            access.entitlements.every(
+              (entitlement) =>
+                entitlement.status !== 'active' ||
+                Date.parse(entitlement.validTo) <= Date.now(),
+            ) &&
+            checkout.available && (
+              <button
+                type="button"
+                onClick={() => navigateTo('/checkout')}
+                className="mt-4 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
+              >
+                Renew or buy again →
+              </button>
+            )}
         </div>
       )}
 

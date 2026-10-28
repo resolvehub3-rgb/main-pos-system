@@ -33,6 +33,7 @@ export interface Availability {
 export interface CommerceFlags {
   accountEnabled: boolean;
   downloadEnabled: boolean;
+  paymentsEnabled: boolean;
 }
 
 export interface PublicCommerceConfig {
@@ -72,7 +73,7 @@ export function accountAvailability(
  * download switch is on AND the backend is configured.
  */
 export function downloadAvailability(
-  flags: CommerceFlags,
+  flags: Pick<CommerceFlags, 'accountEnabled' | 'downloadEnabled'>,
   config: PublicCommerceConfig,
 ): Availability {
   const account = accountAvailability(flags, config);
@@ -85,6 +86,36 @@ export function downloadAvailability(
       available: false,
       reason: account.reason,
       notice: account.reason === 'disabled' ? DOWNLOAD_NEEDS_ACCOUNT_NOTICE : account.notice,
+    };
+  }
+  return {available: true, reason: 'available', notice: ''};
+}
+
+const CHECKOUT_DISABLED_NOTICE =
+  'Online checkout is not open yet. Choose a package and send an enquiry — SamTeck Digital will confirm the price and arrange purchase with you directly.';
+const CHECKOUT_NEEDS_ACCOUNT_NOTICE =
+  'Buying online needs a SamTill account: create one first (or sign in), then come back to this package.';
+
+/**
+ * Checkout needs the payment switch AND the account switch (a payment is tied
+ * to a signed-in session) AND a configured commerce backend. Independent of
+ * the server's own `CHECKOUT_ENABLED` / `PUBLISH_PRICES` gates, which stay
+ * authoritative — this only decides what the site offers to click.
+ */
+export function checkoutAvailability(
+  flags: Pick<CommerceFlags, 'accountEnabled' | 'paymentsEnabled'>,
+  config: PublicCommerceConfig,
+): Availability {
+  const account = accountAvailability(flags, config);
+  if (!flags.paymentsEnabled) {
+    return {available: false, reason: 'disabled', notice: CHECKOUT_DISABLED_NOTICE};
+  }
+  if (!account.available) {
+    return {
+      available: false,
+      reason: account.reason,
+      notice:
+        account.reason === 'disabled' ? CHECKOUT_NEEDS_ACCOUNT_NOTICE : account.notice,
     };
   }
   return {available: true, reason: 'available', notice: ''};

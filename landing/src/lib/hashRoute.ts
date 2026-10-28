@@ -4,9 +4,9 @@
  * The marketing site is a static single-page build with no server rewrites,
  * so account screens live behind hash routes: `#/register`, `#/login`,
  * `#/verify`, `#/forgot-password`, `#/reset-password`, `#/account`,
- * `#/download`. Anything that does not start with `#/` (e.g. the section
- * anchors `#features`, `#contact`) is NOT a route and keeps its normal
- * scroll behaviour.
+ * `#/download`, `#/checkout`. Anything that does not start with `#/` (e.g.
+ * the section anchors `#features`, `#contact`) is NOT a route and keeps its
+ * normal scroll behaviour.
  *
  * Email links append their query string to the configured redirect URL, so a
  * redirect of `https://site/#/verify` arrives as
@@ -23,6 +23,7 @@ export const ACCOUNT_ROUTES = [
   '/reset-password',
   '/account',
   '/download',
+  '/checkout',
 ] as const;
 
 export type AccountRoute = (typeof ACCOUNT_ROUTES)[number];
@@ -99,5 +100,6 @@ export function nextRouteAfterSignIn(params: URLSearchParams): AccountRoute {
   const next = params.get('next');
   if (next === 'download') return '/download';
   if (next === 'register') return '/register';
+  if (next === 'checkout') return '/checkout';
   return '/account';
 }
