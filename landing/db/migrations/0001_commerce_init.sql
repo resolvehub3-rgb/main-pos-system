@@ -50,12 +50,18 @@ revoke all on all sequences in schema public from anon;
 revoke all on all functions in schema public from anon;
 
 revoke insert, update, delete, truncate on all tables in schema public from authenticated;
-revoke insert, update, delete, truncate on all sequences in schema public from authenticated;
+-- Sequences accept only USAGE and SELECT; spelling out INSERT etc. here is a
+-- syntax error (invalid privilege type INSERT for sequence).
+revoke usage, select on all sequences in schema public from authenticated;
 
 alter default privileges in schema public
   revoke all on tables from anon;
 alter default privileges in schema public
+  revoke all on sequences from anon;
+alter default privileges in schema public
   revoke insert, update, delete, truncate on tables from authenticated;
+alter default privileges in schema public
+  revoke usage, select on sequences from authenticated;
 
 grant usage on schema public to anon, authenticated;
 -- Read grants are further restricted by RLS (see policies below).
@@ -180,9 +186,11 @@ create policy "profiles_select_own"
 
 -- -----------------------------------------------------------------------------
 -- 4. plans — server-controlled products/prices
---     Prices are deliberately NOT seeded here. Rows are inserted only after
---     the owner approves the commercial terms. active = false keeps a plan
---     invisible to checkout even once it exists.
+--     APPROVED MODEL: ONE-TIME LICENCE TIERS (GHS 499 / 899 / 1,499), one
+--     computer, six months of maintenance and support. `interval_months`
+--     therefore means "months of access granted by a payment" — 6 — and NOT a
+--     renewal period. Rows are seeded from db/seeds/0001_approved_plans.sql;
+--     active = false keeps a plan invisible to checkout even once it exists.
 -- -----------------------------------------------------------------------------
 
 create table public.plans (
@@ -192,6 +200,14 @@ create table public.plans (
   description         text,
   amount_minor        bigint not null check (amount_minor > 0),
   currency            text not null default 'GHS' check (currency = 'GHS'),
+  -- 'one_time'  : a single charge that grants `interval_months` of access
+  --               (the included support/updates window — 6 for every v1 tier).
+  -- 'recurring' : reserved; only used if subscription billing is ever approved.
+  billing_type        text not null default 'one_time'
+                      check (billing_type in ('one_time', 'recurring')),
+  -- Months of access a successful payment grants. Drives entitlement.valid_to
+  -- in the shared event reducer (api/_lib/event-reducer.ts), so a one-time
+  -- purchase of 6 grants downloads/updates for six months.
   interval_months     int not null check (interval_months between 1 and 60),
   entitlement_product text not null default 'samtill-pos',
   -- Populated only if/when Paystack plan-based auto-renewal is approved.
@@ -201,10 +217,18 @@ create table public.plans (
   updated_at          timestamptz not null default now()
 );
 
+comment on column public.plans.billing_type is
+  'One-time licence tiers are the approved model; recurring is reserved for a '
+  'future approved subscription offering.';
+
+comment on column public.plans.interval_months is
+  'For billing_type=one_time this is the months of access a payment grants '
+  '(6 = the included maintenance/support window), not a renewal period.';
+
 comment on table public.plans is
   'Source of truth for purchasable plans. The browser never sends a price: '
   'checkout resolves the plan server-side and ignores any client-supplied '
-  'amount. Seed rows require owner approval (docs/01-commercial-decisions.md).';
+  'amount. Package ids on the website must equal plans.code.';
 
 create trigger plans_set_updated_at
   before update on public.plans

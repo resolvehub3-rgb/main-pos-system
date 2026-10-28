@@ -526,8 +526,12 @@ test('status: payment gates are reported disabled and the download mode is visib
   });
 });
 
-test('commerce config: pricing and payment display gates are still off in source', () => {
-  assertEqual(PRICING_APPROVED, false, 'PRICING_APPROVED ships false');
+test('commerce config: pricing is approved while the payment display gate is still off', () => {
+  // Phase 0: the one-time tiers (499/899/1499) are approved, so the site no
+  // longer shows draft pricing. The payment switch stays off until the
+  // commerce backend is provisioned — buying still requires a Buy button,
+  // which only appears when the server publishes the matching plan.
+  assertEqual(PRICING_APPROVED, true, 'PRICING_APPROVED is true');
   assertEqual(COMMERCE.paymentsEnabled, false, 'paymentsEnabled ships false');
 });
 

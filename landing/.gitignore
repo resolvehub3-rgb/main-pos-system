@@ -1,3 +1,5 @@
 # Vercel project linkage (created by `vercel link` / `vercel deploy`).
 # Contains only project/org IDs — never commit it.
 .vercel/
+
+.vercel

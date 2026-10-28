@@ -1,9 +1,10 @@
 # SamTill Marketing Website
 
 Public marketing/landing website for **SamTill by SamTeck Digital**, plus the
-**prepared-but-disabled commerce system** (accounts, Paystack test-mode
-checkout, subscription-gated installer downloads) that lives entirely inside
-this folder as reviewable code.
+**prepared-but-disabled commerce system** (accounts, Paystack checkout,
+entitlement-gated installer downloads) that lives entirely inside this folder
+as reviewable code. The commercial model is a **one-time licence** per
+computer with six months of maintenance and support.
 
 This folder is a **standalone workspace**. It is completely separate from the
 SamTill POS application in the repository root.
@@ -28,30 +29,32 @@ SamTill POS application in the repository root.
 - Nothing in the POS source tree is imported or modified by this site.
 - Runs on its own port (`pnpm dev` → 5174), clear of the POS dev server (3000).
 
-## Commerce preparation (review only — nothing is live)
+## Commerce preparation (code ready — backend not provisioned)
 
 | Piece | Location | State |
 | --- | --- | --- |
-| Commercial decisions blocking launch | `docs/01-commercial-decisions.md` | **unresolved** — checkout cannot be enabled |
+| Commercial decisions blocking launch | `docs/01-commercial-decisions.md` | **resolved** — one-time tiers approved (`PRICING_APPROVED = true`) |
 | Architecture & test report | `docs/02-commerce-architecture.md` | prepared |
-| Environment variable names (no values) | `docs/03-environment-variables.md` | prepared; none set anywhere |
+| Environment variable names (no values) | `docs/03-environment-variables.md`, `../docs/ENVIRONMENT.md` | prepared; none set anywhere |
 | Installer delivery & licensing | `docs/04-installer-delivery-and-licensing.md` | prepared; installer never uploaded |
-| Customer journey (register → verify → login → download) | `docs/05-customer-journey.md` | implemented behind feature flags |
+| Customer journey (register → verify → login → buy → verify payment → download) | `docs/05-customer-journey.md` | implemented behind feature flags |
 | API handlers (status/plans/checkout/verify/subscription/download/webhook) | `api/` | implemented, fail-closed, unit-tested |
 | Database schema + RLS | `db/migrations/0001_commerce_init.sql` | prepared, **never executed** |
-| Account UI (register / verify / login / reset / account / download) | `src/pages/*Page.tsx`, `src/lib/authFlow.ts` | implemented, flags `false` |
-| Unit tests | `tests/` | 120 tests, no network/database |
+| Approved plan rows | `db/seeds/0001_approved_plans.sql` | prepared; run after the migration |
+| Account UI (register / verify / login / reset / account / checkout / download) | `src/pages/*Page.tsx`, `src/lib/authFlow.ts`, `src/lib/checkoutClient.ts` | implemented, flags `false` |
+| Unit tests | `tests/` | 163 tests, no network/database |
 | Site preview section (inert) | `src/components/CommercePreview.tsx`, `src/config/commerce.ts` | all capability flags `false` |
 
-There is no checkout button and no working download on the public site. The
-register/login/verify/account/download pages exist at hash routes
-(`/#/register`, `/#/login`, `/#/verify`, `/#/forgot-password`,
-`/#/reset-password`, `/#/account`, `/#/download`) but are hidden and show a
-"not available" notice while `COMMERCE.accountEnabled` /
-`COMMERCE.downloadEnabled` are `false` in `src/config/commerce.ts` — they are
-for local testing until the owner flips those flags. Prices remain flagged as
-drafts (`PRICING_APPROVED = false`), and the API independently refuses checkout
-(`CHECKOUT_ENABLED` unset) — the site cannot enable payments on its own.
+There is no working payment or download on the public site **yet**. The
+register / login / verify / account / checkout / download pages exist at hash
+routes (`/#/register`, `/#/login`, `/#/verify`, `/#/forgot-password`,
+`/#/reset-password`, `/#/account`, `/#/checkout`, `/#/download`) but every
+"buy" and "download" call to action is hidden while `COMMERCE.accountEnabled`
+/ `COMMERCE.paymentsEnabled` / `COMMERCE.downloadEnabled` are `false` in
+`src/config/commerce.ts` — and even then the API independently refuses to
+serve prices (`PUBLISH_PRICES`) or start checkout (`CHECKOUT_ENABLED`). The
+price on the checkout screen is whatever the server publishes in the `plans`
+table; the browser never sends a price.
 
 ## Development
 
@@ -78,9 +81,10 @@ pnpm preview     # serve the production build locally (http://localhost:4173)
 | Prices, package names, descriptions | `src/config/pricing.ts`          |
 | Comparison table rows         | `src/config/pricing.ts` (`COMPARISON_ROWS`) |
 | Licence & support terms       | `src/config/pricing.ts` (`LICENCE_TERMS`) |
-| Hide/replace the draft notice | `src/config/pricing.ts` (`PRICING_APPROVED = true`) |
+| Show the draft-pricing notice again | `src/config/pricing.ts` (`PRICING_APPROVED = false`) |
 | Contact details               | `src/config/contact.ts` (`CONTACT`)    |
-| Enable send buttons           | `src/config/contact.ts` (fill fields + `ownerConfirmed = true`) |
+| Disable the enquiry buttons   | `src/config/contact.ts` (`ownerConfirmed = false`) |
+| Buy / Sign-in / Download links | `src/config/commerce.ts` (capability flags) + `src/config/site.ts` (nav) |
 | Nav, footer, preview banner   | `src/config/site.ts`                   |
 | Privacy / Terms text          | `public/privacy.html`, `public/terms.html` |
 
@@ -111,20 +115,31 @@ pnpm build
 
 **Do not publish until:**
 
-1. The owner has approved the prices in `src/config/pricing.ts`
-   (`PRICING_APPROVED = true`).
-2. Real contact details are filled into `src/config/contact.ts`
+1. ~~The owner has approved the prices in `src/config/pricing.ts`~~ — done
+   (`PRICING_APPROVED = true`; one-time tiers GHS 499 / 899 / 1,499).
+2. ~~Real contact details are filled into `src/config/contact.ts`~~ — done
    (`ownerConfirmed = true`).
-3. Privacy Policy and Terms of Service texts are approved.
+3. ~~Privacy Policy and Terms of Service texts are approved~~ — done; both
+   pages now cover the selling journey, refunds and Paystack payments.
 4. `SITE.siteApprovedForLaunch` in `src/config/site.ts` is set to `true`
-   (removes the preview banner).
-5. For the customer-account journey only: the `samtill-commerce` Supabase
-   project exists, its migration has been reviewed and run, email confirmation
-   is configured, `VITE_COMMERCE_SUPABASE_URL` / `VITE_COMMERCE_SUPABASE_ANON_KEY`
-   are set, and `COMMERCE.accountEnabled` / `COMMERCE.downloadEnabled` are
-   flipped in `src/config/commerce.ts` (see `docs/05-customer-journey.md`).
-   `DOWNLOAD_ACCESS_MODE` on the API decides whether downloads need a
-   subscription (default) or just a verified account.
+   (removes the preview banner) — **leave false until the commerce backend
+   below exists and a test-mode purchase has succeeded end to end.**
+5. For the whole customer journey (register → verify → pay → download):
+
+   1. the `samtill-commerce` Supabase project exists, the migration **and**
+      `db/seeds/0001_approved_plans.sql` have been run against it (never
+      against the POS project);
+   2. Auth email delivery is configured in that project;
+   3. Vercel holds the server env vars plus the client
+      `VITE_COMMERCE_SUPABASE_URL` / `VITE_COMMERCE_SUPABASE_ANON_KEY`
+      (`../docs/ENVIRONMENT.md` is the full matrix);
+   4. Paystack (test keys) is registered with the callback URL and webhook;
+   5. the installer release row is `is_active = true` in the `installers`
+      bucket;
+   6. `COMMERCE.accountEnabled` / `COMMERCE.paymentsEnabled` /
+      `COMMERCE.downloadEnabled` are flipped in `src/config/commerce.ts`, and
+      the server-side `PUBLISH_PRICES=true` / `CHECKOUT_ENABLED=true` are set
+      (`ALLOW_LIVE_PAYMENTS=true` only when the live key goes in).
 
 No download link may be published until the owner approves a verified,
 secure installer. No payment, registration or licensing claims may be added

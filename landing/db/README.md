@@ -18,7 +18,16 @@ This folder holds **review-only SQL** for the future, dedicated SamTill
 | File                                | Purpose                                                              |
 | ----------------------------------- | -------------------------------------------------------------------- |
 | `migrations/0001_commerce_init.sql` | Full schema: accounts, plans, orders, subscriptions, entitlements, installer releases, download audit, webhook dedup, audit logs, deny-by-default RLS, private `installers` bucket. |
+| `seeds/0001_approved_plans.sql`     | The three approved one-time plan rows (starter / business / professional) that the website's package ids must match. |
+
+## Run order (once, on the dedicated commerce project)
+
+1. `migrations/0001_commerce_init.sql`
+2. `seeds/0001_approved_plans.sql`
+3. verify: RLS denies the anon key on every table except the intended
+   `profiles` self-select, and the `installers` bucket rejects anonymous reads.
 
 See `../docs/02-commerce-architecture.md` for the schema rationale, endpoint
-status matrix, retention rules and the security checklist, and
-`../docs/01-commercial-decisions.md` for why no prices are seeded.
+status matrix, retention rules and the security checklist. The approved
+one-time pricing model and its rationale are recorded in
+`../docs/01-commercial-decisions.md`.

@@ -1,18 +1,19 @@
 /**
  * ---------------------------------------------------------------------------
- * CONTACT DETAILS — OWNER CONFIRMATION REQUIRED
+ * CONTACT DETAILS — CONFIRMED
  * ---------------------------------------------------------------------------
- * Placeholder values must never be presented to the public as real contact
- * details. Leave a field empty and the website will visibly state that the
- * detail is still being finalised, and the corresponding button will be
- * disabled until you fill it in.
+ * Every field below holds a real, verified detail and `ownerConfirmed` is
+ * true, so both enquiry buttons are live: they open the visitor's own email
+ * app or WhatsApp with a pre-filled message. Nothing is sent from a server
+ * and no third party is involved.
  *
- * To go live, fill in the real values below AND set `ownerConfirmed` to true.
+ * If a detail ever becomes stale, empty the field — the site then shows a
+ * "still being finalised" notice instead of publishing a wrong value.
  */
 
 export const CONTACT = {
   /** Set to true once every field below holds a real, verified detail. */
-  ownerConfirmed: false,
+  ownerConfirmed: true,
 
   /** Real business email, e.g. 'sales@samteckdigital.com' */
   email: 'samteckdigital@gmail.com',

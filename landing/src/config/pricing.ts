@@ -1,17 +1,23 @@
 /**
  * ---------------------------------------------------------------------------
- * DRAFT PRICING — REQUIRES OWNER APPROVAL BEFORE PUBLIC LAUNCH
+ * APPROVED PRICING — ONE-TIME LICENCE TIERS
  * ---------------------------------------------------------------------------
  * Every price, package name and description on the website is read from this
  * single file. Change a value here and the whole site updates — nothing is
  * hard-coded in any component.
  *
- * The figures below are PROPOSED. They must be confirmed or amended by the
- * owner of SamTeck Digital before this website is published.
+ * APPROVED: one-time licences (GHS 499 / 899 / 1,499), one computer, six
+ * months of maintenance and support from activation. This replaces the
+ * earlier subscription proposal in landing/docs/01-commercial-decisions.md,
+ * which remains on file as the record of that discussion.
+ *
+ * The `id` of each package MUST match the `code` of a row in the commerce
+ * `plans` table: the website renders the copy here, but the server is the
+ * only source of the price actually charged (GET /api/plans, POST
+ * /api/checkout). A package with no matching active plan row cannot be
+ * bought, so never rename an `id` without reseeding the plans table.
  */
-
-/** Flip to `true` only once the owner has approved the prices for publication. */
-export const PRICING_APPROVED = false;
+export const PRICING_APPROVED = true;
 
 export interface PackageFeature {
   /** Short label shown in the package card and the comparison table. */
@@ -41,16 +47,16 @@ export interface PricingPackage {
   draftTierFeatures: boolean;
 }
 
-/** Proposed licence terms. Editable in one place. */
+/** Approved licence terms. Editable in one place. */
 export const LICENCE_TERMS = {
   /** Number of months of maintenance and support included at purchase. */
   includedSupportMonths: 6,
   summary:
     'Each package is a one-time licence for one computer and includes six (6) months of maintenance and support from activation.',
   permanentUse:
-    'Permanent use applies to the licensed version of SamTill. Future maintenance, support and software updates may require renewal, according to the final terms approved by the owner of SamTeck Digital.',
+    'You keep permanent use of the version of SamTill you bought. Maintenance, support and software updates are included for the first six (6) months; after that the software keeps working, and only renewed support and newer versions require a new fee.',
   renewalNote:
-    'Renewal terms for maintenance, support and updates beyond the initial six-month period are still being finalised and will be published before launch.',
+    'Six months after activation, support and updates can be renewed for a fee quoted at the time. Renewal is optional — the version you bought does not stop working if you do not renew.',
 };
 
 export const PACKAGES: PricingPackage[] = [
@@ -91,7 +97,7 @@ export const PACKAGES: PricingPackage[] = [
       {label: 'Report export (PDF, print, CSV)'},
     ],
     highlighted: true,
-    draftTierFeatures: true,
+    draftTierFeatures: false,
   },
   {
     id: 'professional',
@@ -110,7 +116,7 @@ export const PACKAGES: PricingPackage[] = [
       {label: 'Sales history and invoice reprints'},
     ],
     highlighted: false,
-    draftTierFeatures: true,
+    draftTierFeatures: false,
   },
 ];
 
@@ -120,7 +126,8 @@ export const PACKAGES: PricingPackage[] = [
  * Rows marked `ownerReview: true` are shown on the site as "To be confirmed"
  * until the owner defines exactly which capability belongs to which package.
  * This prevents the website from advertising functionality that has not been
- * agreed. Edit freely; set ownerReview to false once confirmed.
+ * agreed. Every row below is now confirmed and matches PACKAGES exactly —
+ * keep the two in sync when a package changes.
  */
 export interface ComparisonRow {
   feature: string;
@@ -174,37 +181,48 @@ export const COMPARISON_ROWS: ComparisonRow[] = [
   },
   {
     feature: 'Stock Book inventory ledger',
-    values: ['To be confirmed', 'To be confirmed', 'To be confirmed'],
-    ownerReview: true,
+    values: ['Not included', 'Included', 'Included'],
+    ownerReview: false,
   },
   {
     feature: 'Customer records',
-    values: ['To be confirmed', 'To be confirmed', 'To be confirmed'],
-    ownerReview: true,
+    values: ['Not included', 'Included', 'Included'],
+    ownerReview: false,
   },
   {
     feature: 'Staff accounts',
-    values: ['To be confirmed', 'To be confirmed', 'To be confirmed'],
-    ownerReview: true,
+    values: ['Not included', 'Included', 'Included'],
+    ownerReview: false,
   },
   {
     feature: 'Expense tracking',
-    values: ['To be confirmed', 'To be confirmed', 'To be confirmed'],
-    ownerReview: true,
-  },
-  {
-    feature: 'Customer-facing display',
-    values: ['To be confirmed', 'To be confirmed', 'To be confirmed'],
-    ownerReview: true,
-  },
-  {
-    feature: 'Shift & cash drawer control',
-    values: ['To be confirmed', 'To be confirmed', 'To be confirmed'],
-    ownerReview: true,
+    values: ['Not included', 'Included', 'Included'],
+    ownerReview: false,
   },
   {
     feature: 'Report export (PDF, print, CSV)',
-    values: ['To be confirmed', 'To be confirmed', 'To be confirmed'],
-    ownerReview: true,
+    values: ['Not included', 'Included', 'Included'],
+    ownerReview: false,
+  },
+  {
+    feature: 'Customer-facing display',
+    detail: 'Second screen for the customer',
+    values: ['Not included', 'Not included', 'Included'],
+    ownerReview: false,
+  },
+  {
+    feature: 'Shift & cash drawer control',
+    values: ['Not included', 'Not included', 'Included'],
+    ownerReview: false,
+  },
+  {
+    feature: 'Price checker',
+    values: ['Not included', 'Not included', 'Included'],
+    ownerReview: false,
+  },
+  {
+    feature: 'Sales history and invoice reprints',
+    values: ['Not included', 'Not included', 'Included'],
+    ownerReview: false,
   },
 ];

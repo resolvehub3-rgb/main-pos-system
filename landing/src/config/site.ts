@@ -14,7 +14,7 @@ export const SITE = {
   /** Set true once the site is approved for public launch. */
   siteApprovedForLaunch: false,
   previewNotice:
-    'Preview build — package pricing is proposed and awaits owner approval before public launch.',
+    'Preview build — the online store is not live yet. Payments and downloads open when SamTeck Digital publishes the site.',
 } as const;
 
 export const NAV_LINKS = [

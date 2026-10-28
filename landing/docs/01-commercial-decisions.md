@@ -1,59 +1,82 @@
-# 01 — Commercial decisions (planning revision)
+# 01 — Commercial decisions
 
-**Status: PLANNING ONLY — nothing here is approved for publication or
-implementation.** Revision date: 2026-10-27.
+**Status: DECIDED — one-time licence tiers.** Decision recorded 2026-10-28.
+Everything below is the earlier planning revision, kept as the record of the
+subscription proposal that was considered and **not** adopted.
 
-This revision records a set of *proposed* commercial decisions supplied for
-planning, calculates the annual-plan economics, separates two different
-grace-period concepts, lists the rules that remain unresolved, and reviews
-the existing SQL/API build against the proposal.
+## Decision in force (2026-10-28)
 
-**Hard constraints still in force (unchanged):**
+| # | Decision | Approved value |
+| --- | --- | --- |
+| D1 | Commercial model | **One-time licence** per computer — no recurring billing, nothing auto-renews |
+| D2 | Tiers | Starter **GHS 499** · Business **GHS 899** · Professional **GHS 1,499** |
+| D3 | Licence scope | **One computer** per licence |
+| D4 | Included support & updates | **Six months** from activation; use of the licensed version itself is perpetual |
+| D5 | Renewal | Optional, quoted when the included period ends — never required to keep selling |
 
-- Prices stay **unpublished**: `PRICING_APPROVED = false`,
-  `PUBLISH_PRICES` unset → `GET /api/plans` answers 403.
-- Checkout stays **disabled**: `COMMERCE.*` flags false,
-  `CHECKOUT_ENABLED` unset → `POST /api/checkout` answers 503.
-- **No plan/price rows** exist in the database; none are seeded here.
-- The proposed prices below appear **only in this internal document** —
-  not in site content, SQL, API code, or any customer-facing surface.
-- No code, SQL, or configuration is changed by this revision.
+**Where this lives in the build:**
 
-## How to read the statuses
-
-| Status | Meaning |
+| Surface | Location |
 | --- | --- |
-| **Proposed** | Owner-provided in this revision; used as the planning baseline. NOT approved for publication, schema seeding, or code. |
-| **Confirmed** | Already fixed in the build (cannot drift). |
-| **Unresolved** | Still open; must be answered before the related code/SQL exists or any gate flips. |
+| Public prices, package copy, comparison table, licence terms | `src/config/pricing.ts` (`PRICING_APPROVED = true`) |
+| Refund / cancellation / chargeback policy (Paystack onboarding requirement) | `public/terms.html` §6–§8 |
+| Privacy statement covering accounts, payments and shop data | `public/privacy.html` |
+| Schema | `db/migrations/0001_commerce_init.sql` — `plans.billing_type = 'one_time'`, `interval_months = 6` = the access window a payment grants |
+| Plan rows (prepared, never executed) | `db/seeds/0001_approved_plans.sql` — codes `starter` / `business` / `professional`, must equal the website package ids |
+| Buy → pay → verify → download journey | `src/pages/CheckoutPage.tsx`, `src/lib/checkoutClient.ts` |
+
+### Hard constraints still in force
+
+- **Authoritative price = the `plans` table.** Site copy shows the same
+  figures, but the browser never sends a price: checkout resolves the plan
+  server-side. `GET /api/plans` answers 403 until `PUBLISH_PRICES=true`.
+- **Checkout stays disabled until the backend exists**: `COMMERCE.*` flags
+  false and `CHECKOUT_ENABLED` unset → `POST /api/checkout` answers 503.
+- Plan rows are seeded only on the dedicated commerce project, after the
+  migration, never on the POS project.
+- Prices quoted anywhere in the planning revision below are historical; the
+  site copy and the seed are the sources of truth.
 
 ---
 
-## 1. Proposed commercial decisions (planning baseline)
+## How to read the statuses below (historical revision)
+
+| Status | Meaning |
+| --- | --- |
+| **Proposed** | Owner-provided in the planning revision; this is the subscription model that was later set aside (see the decision table above). |
+| **Confirmed** | Already fixed in the build (cannot drift). |
+| **Unresolved** | Open at the time of the planning revision. |
+
+---
+
+## 1. Proposed commercial decisions (planning baseline — NOT ADOPTED)
+
+> The subscription model proposed here on 2026-10-27 was **not adopted**. The
+> approved model is the one-time tier structure recorded at the top of this
+> file. This section is kept because it is the reasoning the decision was made
+> against.
 
 | # | Decision | Proposed value | Status |
 | --- | --- | --- | --- |
-| P1 | Commercial model | **Recurring subscription** (replaces the earlier one-time-licence draft) | Proposed — planning only |
-| P2 | Monthly price | **GHS 599** per month | Proposed — **unpublished**, economics flagged (§2) |
-| P3 | Annual price | **GHS 1,999** per year | Proposed — **unpublished**, economics flagged (§2) |
-| P4 | Free trial | **14 days** | Proposed — rules unresolved (§4.3) |
-| P5 | Payment methods | **Mobile Money and card**, subject to provider support and eligibility | Proposed — renewal mechanics unresolved (§4.1, §4.2) |
-| P6 | Licence scope | **One subscription per shop**, covering authorized devices under a policy **still to be defined** | Proposed — scope rules unresolved (§4.4) |
-| P7 | Offline licence grace | **7 days**, proposed and **not implemented** | Proposed — see §3; POS-side, separate approval |
+| P1 | Commercial model | **Recurring subscription** (replaces the earlier one-time-licence draft) | **Not adopted** — one-time tiers approved instead (D1) |
+| P2 | Monthly price | **GHS 599** per month | Superseded by D2 |
+| P3 | Annual price | **GHS 1,999** per year | Superseded by D2 |
+| P4 | Free trial | **14 days** | **Not adopted** — no trial; the refund policy in `public/terms.html` §6 governs instead |
+| P5 | Payment methods | **Mobile Money and card**, subject to provider support and eligibility | **Adopted** — Paystack hosts both; one-time charges only (no renewal mechanics) |
+| P6 | Licence scope | **One subscription per shop**, covering authorized devices under a policy **still to be defined** | Superseded by D3/D6 — **one computer** per licence; device recorded, limit enforced with an owner override |
+| P7 | Offline licence grace | **7 days**, proposed and **not implemented** | Still open — POS-side, part of the Phase 2 design |
 
-### Consequences flagged now (not actions taken)
+### Consequences flagged now (and how they resolved)
 
-1. **The marketing site currently says something different.** Live draft
-   content advertises *three one-time tiers* — Starter GHS 499 / Business
-   GHS 899 / Professional GHS 1,499 — "one-time licence **for one computer**"
-   with six months of support (`src/config/pricing.ts`, FAQ, Comparison).
-   The proposal is *one subscription **per shop**, monthly/annual*. If the
-   proposal is approved, the site copy needs its own approved revision.
-   **No site content is changed by this document.** The existing draft
-   prices remain flagged `PRICING_APPROVED = false`.
-2. **Packaging is undefined.** The proposal prices one product at two
-   intervals; it does not say what happens to the three-tier structure
-   (do tiers survive? is599 the Starter price?). Unresolved — §4.
+1. **The site copy and the proposal disagreed.** The marketing site advertises
+   the three one-time tiers — Starter GHS 499 / Business GHS 899 /
+   Professional GHS 1,499, "one-time licence **for one computer**" with six
+   months of support (`src/config/pricing.ts`, FAQ, Comparison). The decision
+   resolved this **in favour of the site's model**: `PRICING_APPROVED` is now
+   `true` and those tiers are the approved ones.
+2. **Packaging was undefined** under the proposal — it priced one product at
+   two intervals and never said what happened to the three-tier structure.
+   Under D1/D2 each tier is its own row in `plans`, so packaging is explicit.
 
 ---
 

@@ -48,6 +48,7 @@ in `src/config/commerce.ts` these are not needed at all — leave them unset.
 | --- | --- | --- | --- |
 | `VITE_COMMERCE_SUPABASE_URL` | yes, once accounts are enabled | `src/lib/supabaseAdapter.ts` | Base URL of the **dedicated commerce** Supabase project (never the POS project). Must be `https://` (localhost allowed for dev). |
 | `VITE_COMMERCE_SUPABASE_ANON_KEY` | yes, once accounts are enabled | `src/lib/supabaseAdapter.ts` | The commerce project's **anon / publishable** key (`sb_publishable_…` or JWT). The service-role key must never be given to the client. |
+| `VITE_COMMERCE_API_BASE` | no (default `''`) | `src/lib/commerceClient.ts` | Origin of the serverless API when the site and the API are **not** on the same host. `''` (or unset) = same origin, which is the normal Vercel setup where `/api/*` is served beside the site. Set it only if the API is deployed elsewhere, e.g. `https://api.example.com` — no trailing slash, no path. |
 
 Missing client config is handled gracefully: account pages show a
 "not available" notice instead of crashing, and the API keeps working.

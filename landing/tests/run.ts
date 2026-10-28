@@ -12,6 +12,7 @@ import './session.test.ts';
 import './commerce-logic.test.ts';
 import './account-logic.test.ts';
 import './download-flow.test.ts';
+import './checkout-flow.test.ts';
 import {runAll} from './harness.ts';
 
 console.log('SamTill commerce — local unit tests\n');
