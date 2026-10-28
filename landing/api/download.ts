@@ -43,6 +43,7 @@
  */
 
 import {writeAudit} from './_lib/audit.ts';
+import {isEmailConfirmed} from './_lib/auth-admin.ts';
 import {
   loadEntitlementsForUser,
   type EntitlementRowFull,
@@ -58,6 +59,7 @@ import {
   sha256Hex,
 } from './_lib/http.ts';
 import {
+  decideVerifiedAccountDownload,
   evaluateDownloadAccess,
   toDownloadEventResult,
   type DownloadDecisionReason,
@@ -89,6 +91,8 @@ function denyMessage(reason: DownloadDecisionReason): string {
       return 'Your access period has ended. Renew to download again.';
     case 'inactive_status':
       return 'Your access is currently inactive. Please contact support.';
+    case 'email_unverified':
+      return 'Please confirm your email address first, then download again. Check your inbox for the confirmation link.';
     default:
       return 'Download not available.';
   }
@@ -121,11 +125,22 @@ export async function POST(request: Request): Promise<Response> {
   const now = new Date();
   let decision: ReturnType<typeof evaluateDownloadAccess>;
   if (config.downloadAccessMode === 'verified_account') {
-    // Owner-enabled mode: every signed-in customer of the commerce project
-    // may fetch the installer FILE (session + rate limit + audit above/below
-    // still apply). Email verification is enforced by the project's
-    // "Confirm email" setting — an unconfirmed address never gets a session.
-    decision = {allowed: true, reason: 'granted'};
+    // Owner-approved launch policy: the installer is available to any
+    // EMAIL-CONFIRMED customer, with no payment. Confirmation is checked
+    // authoritatively, server-side, against the commerce project's Auth Admin
+    // API (see api/_lib/auth-admin.ts) — a valid access token alone is NOT
+    // treated as proof of a confirmed address, because a project with
+    // "Confirm email" disabled issues tokens for unconfirmed users.
+    //
+    // This grants download ACCESS to the installer FILE only. It is never a
+    // subscription, licence, or payment confirmation.
+    const confirmed = await isEmailConfirmed(config, userId);
+    if (confirmed === null) {
+      // Lookup failed — fail closed with a retryable backend error instead of
+      // guessing either way. Nothing is audited: no decision was reached.
+      return apiError(502, 'backend_unavailable', 'Could not confirm your account right now. Please try again shortly.');
+    }
+    decision = decideVerifiedAccountDownload(confirmed);
   } else {
     try {
       const entitlements: EntitlementRowFull[] = await loadEntitlementsForUser(config, userId);

@@ -139,12 +139,22 @@ begin
     return new; -- phone-only or admin-created users: profile filled in later
   end if;
 
-  insert into public.profiles (id, email, full_name)
+  insert into public.profiles (id, email, full_name, phone)
   values (
     new.id,
     new.email,
     left(coalesce(new.raw_user_meta_data ->> 'full_name',
-                  new.raw_user_meta_data ->> 'name', ''), 120)
+                  new.raw_user_meta_data ->> 'name', ''), 120),
+    -- Optional. Stored only when it matches the profiles.phone CHECK
+    -- constraint; anything else becomes NULL rather than failing the whole
+    -- signup over a formatting nicety. The browser validates the same shape
+    -- before submitting (src/lib/validation.ts).
+    case
+      when new.raw_user_meta_data ->> 'phone' is null then null
+      when new.raw_user_meta_data ->> 'phone' ~ '^\+?[0-9][0-9 ]{6,19}$'
+        then new.raw_user_meta_data ->> 'phone'
+      else null
+    end
   )
   on conflict (id) do nothing;
 
@@ -408,7 +418,8 @@ create table public.download_events (
                     'denied_expired',
                     'denied_inactive',
                     'denied_no_release',
-                    'denied_rate_limited'))
+                    'denied_rate_limited',
+                    'denied_unverified_email'))
 );
 
 comment on table public.download_events is

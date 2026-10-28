@@ -63,7 +63,13 @@ an in-flight payment can always be confirmed.
 authenticated user (Supabase access token in Authorization header)
   → DOWNLOAD_ACCESS_MODE gate:
       entitlement (default)      → active entitlement? (deny otherwise)
-      verified_account (opt-in)  → email_confirmed_at present? (deny otherwise)
+      verified_account (opt-in)  -> Auth Admin lookup: email_confirmed_at?
+                                   (authoritative server-side check using the
+                                   service-role key; a valid access token alone
+                                   is NOT treated as proof. Lookup failure =
+                                   502 backend_unavailable. Unconfirmed =
+                                   403 email_unverified, audited as
+                                   denied_unverified_email)
                                    — owner decision (doc 01 §6, doc 05); this is
                                    download access, NOT a licence
   → newest active installer_releases row (server chooses; client cannot pick)

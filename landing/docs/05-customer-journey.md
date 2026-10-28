@@ -18,48 +18,62 @@ external configuration is still required, and how the flow was tested.
    (no shop details, no ID numbers; a website account is not a POS tenant and
    does not activate a licence). Client-side validation mirrors the schema
    (email format, password 8–200 chars and not only spaces, name ≤ 120 chars,
-   phone format when given). A Supabase **anonymous session** is created
-   so the new user is authenticated from the moment the account row is inserted —
-   the row-level-security policy in the planned `samtill-commerce` project allows
-   an insert only for `auth.uid() = id`, which makes role self-assignment
-   impossible. Server response is neutral ("check your inbox") whether or not the
-   account already existed, so registration cannot be used to enumerate accounts.
-   The page explicitly states that a licence is a separate purchase/activation.
-3. **Verify email.** Supabase Auth sends the confirmation email. The app polls
-   the session (2 s, up to 20 s) and reads `user.email_confirmed_at`; the UI only
-   ever says "verified" when that timestamp is actually present. "Resend email"
-   calls the auth `resend` endpoint. No verification claim is ever made from a
-   client-side flag.
-4. **Login** (`/#/login`). `signInWithPassword`; unverified accounts are refused
-   with a clear "verify your email first" message and a resend link. Sessions are
-   stored in `localStorage` by supabase-js, so a browser refresh restores the
-   session through `getUser()` (server-side session validation, not a cached
-   flag).
-5. **Account page** (`/#/account`). Protected: only rendered for a confirmed
-   session; otherwise it redirects to `/#/login`. Shows identity, verified state,
-   and the licence status ("No licence activated — licences are managed
+   phone format when given). The browser sends **no** profile row and **no**
+   role of any kind — the `profiles` row is created by a `security definer`
+   trigger on `auth.users` (`db/migrations/0001_commerce_init.sql`), so there
+   is no client write path that could be used to self-assign a privileged
+   role. The provider's response is neutral ("check your inbox") whether or
+   not the account already existed, so registration cannot be used to
+   enumerate accounts. The page explicitly states that a licence is a
+   separate purchase/activation.
+3. **Verify email.** Supabase Auth sends the confirmation email, which links
+   to `/#/verify?token_hash=...&type=signup` (or `?code=...` in the PKCE
+   flow). The page exchanges those parameters with the provider and shows
+   "verified" **only** when a session comes back. A plain visit, an expired
+   link, a reused link or a malformed one each produce a specific, honest
+   failure message with a way forward. There is no polling and no
+   client-side "verified" flag; the provider's answer is the only source of
+   truth.
+4. **Login** (`/#/login`). `signInWithPassword`. When the provider reports the
+   address is unconfirmed (`email_not_confirmed`), the page shows a dedicated
+   panel with a **Resend the confirmation email** button. Sessions are stored
+   in `localStorage` by supabase-js; on mount the session hook re-validates the
+   persisted session with `getUser()` (a server round-trip), so a session
+   revoked or deleted server-side resolves to signed-out instead of being
+   served from the stale cache. The real security boundary remains the
+   server-side check inside `POST /api/download`.
+5. **Account page** (`/#/account`). Protected: with no confirmed session it
+   renders an inline "sign in" notice instead of the account content. Shows
+   identity, the verification state (from the server-confirmed session user),
+   and the licence status ("No licence activated - licences are managed
    separately from accounts"). Sign-out clears the local session.
 6. **Download page** (`/#/download`). Protected. Two access modes
    (`DOWNLOAD_ACCESS_MODE` on the API):
-   - `entitlement` (**default, unchanged behaviour**): calls `POST /api/download`
-     with the bearer access token; the API requires an authenticated
-     subscription (`/v1/billing/subscription`) before issuing a short-lived
-     signed download session. Verified accounts without a subscription get a
-     neutral "no licence yet" message with a link back to pricing.
-   - `verified_account` (opt-in, not enabled anywhere yet): the same API call
-     succeeds for any **email-verified** account, because SamTill decided the
-     first public release should let verified accounts download the installer
-     before payments are switched on. This is an explicit owner decision recorded
-     in `01-commercial-decisions.md`; it does not activate or imply a licence.
-   The page shows the real installer details (name, version, size, SHA-256 —
-   read from `GET /api/status`, never hard-coded in the client), a progress bar
-   driven by actual `fetch`/`ReadableStream` progress, and a Windows-only notice
-   distinguishing the installer from the web/PWA app. The href is always the API
-   endpoint, so no signed URL is ever baked into the bundle.
-7. **Errors are honest.** Missing installer → the API returns
-   `installer_unavailable` and the UI explains the file is not on the server yet.
-   Expired/invalid session → 401, the UI returns the customer to the login page.
-   Network failure → the real error message is shown; nothing is faked.
+   - `entitlement` (**default, unchanged behaviour**): `POST /api/download`
+     with the bearer access token; the API requires an active entitlement row
+     for `samtill-pos` before issuing a short-lived signed URL. Customers
+     without one get a neutral "no installer downloads yet" message.
+   - `verified_account` (opt-in; the recommended policy for the payments-free
+     first release): the same call succeeds only for an account whose email
+     address is **confirmed**. Confirmation is checked **server-side,
+     authoritatively**, against the commerce project's Auth Admin API (a
+     service-role lookup in `api/_lib/auth-admin.ts`) -- a valid access token
+     alone is deliberately *not* treated as proof, because a project with
+     "Confirm email" disabled issues tokens for unconfirmed users. An
+     unconfirmed address is denied (`email_unverified`) and that refusal is
+     audited. This grants download ACCESS ONLY; it is never a subscription,
+     licence or payment confirmation.
+    The installer details in the response (version, filename, size, SHA-256)
+    come from the `installer_releases` row the **server** selected; the client
+    cannot choose a version or a storage path. The page downloads via the
+    short-lived signed URL it was issued, shows the real size and hash so the
+    file can be verified, and carries a Windows-only notice distinguishing the
+    installer from the web/PWA app.
+7. **Errors are honest.** Missing installer -> `403 download_unavailable`, and
+   the UI explains the file is not published yet. Expired/invalid session ->
+   `401`, and the UI asks the customer to sign in again. Rate limited ->
+   `429` with the wait time. Network failure -> the real error message is
+   shown; nothing is faked.
 
 ## 2. What was added (file by file)
 
@@ -71,16 +85,18 @@ external configuration is still required, and how the flow was tested.
 - `src/lib/hashRoute.ts` + `src/lib/useHashRoute.ts` — tiny hash router (no new
   routing dependency) so the static build works on any host.
 - `src/lib/authFlow.ts` — supabase-independent orchestration: register, sign in,
-  sign out, session restore, verification polling, password reset, resend,
+  sign out, session restore, verification link exchange, password reset, resend,
   download-access mode evaluation.
 - `src/lib/downloadClient.ts` — client for `POST /api/download` and
-  `GET /api/status` with abortable streaming and real progress.
+  `GET /api/status`; classifies every server answer honestly (session expired,
+  denied with reason, rate limited, missing installer, network failure).
 - `src/lib/commerceClient.ts` + `src/lib/supabaseAdapter.ts` — the existing
   prepared commerce API wiring, now backed by a real supabase-js auth client when
   `VITE_COMMERCE_SUPABASE_URL` / `VITE_COMMERCE_SUPABASE_ANON_KEY` are set.
 - `src/lib/useAccountSession.ts` — React session state (loading / signed-in /
-  signed-out) with server-side `getUser()` validation on mount and on
-  `visibilitychange`.
+  signed-out). Re-validates the persisted session with `getUser()` on mount, so
+  a session revoked server-side is not served from the stale localStorage copy.
+  (UX guard only; the security boundary is the API.)
 - `src/lib/navigation.ts` — canonical hash paths.
 
 **UI:**
@@ -96,15 +112,21 @@ external configuration is still required, and how the flow was tested.
 - `src/config/site.ts` gained `webAppUrl: ''`.
 
 **API:**
-- `api/_lib/env.ts` — new validated `downloadAccessMode` setting.
-- `api/download.ts` — mode branch (`entitlement` keeps the subscription check
-  verbatim; `verified_account` uses `getUser()` and requires
-  `email_confirmed_at`). No secrets or signed URLs are returned to the browser
-  beyond the existing single, short-lived redirect.
+- `api/_lib/env.ts` — new validated `downloadAccessMode` setting
+  (`entitlement` | `verified_account`, default `entitlement`; anything else is
+  a config error).
+- `api/download.ts` — mode branch. `entitlement` keeps the entitlement check
+  verbatim. `verified_account` performs an authoritative server-side email
+  confirmation lookup and denies `email_unverified` when the address is not
+  confirmed. No secrets or signed URLs are returned to the browser beyond the
+  existing single, short-lived redirect.
+- `api/_lib/auth-admin.ts` — service-role lookup of a commerce user against
+  the Auth Admin API, used only to answer "is this address confirmed?".
+  Fails closed: a lookup error is surfaced as a backend error, never as
+  access.
+- `api/_lib/entitlement.ts` — added `email_unverified` deny reason and the
+  pure `decideVerifiedAccountDownload()` policy helper.
 - `api/status.ts` — now reports `downloadAccessMode` for diagnostics.
-- `api/_lib/commerceApiAuth.ts` — tiny hook added so an existing bearer token is
-  reused instead of minting an anonymous session per request (fixes a latent
-  bug: downloads previously always ran as the anonymous role).
 
 **Dependency:** `@supabase/supabase-js@^2.118.0` (auth + REST client for the
 separate `samtill-commerce` Supabase project). No Prisma, no Neon, no new
@@ -124,21 +146,29 @@ database.
 - **There is no shop or tenant mapping.** SamTill sells one product directly;
   customer records are global and are never joined to POS `shops`, `users`,
   `roles` or `tenants`. Any future multi-shop mapping must be designed and
-  approved separately.
-- Roles: the planned `user_roles` RLS policies allow a user to read only their
-  own rows and allow no client-side inserts/updates at all, so a customer can
-  never self-assign `admin` or `super_admin`.
+  approved separately. Creating a website account therefore does **not**
+  provision, activate or modify a POS shop.
+- **Roles: there is no client-writable role at all.** The commerce schema has
+  no `user_roles` table and the browser has no write path to any table — every
+  table is RLS-enabled with either no policy (service-role only) or a single
+  select-own policy on `profiles`. The `profiles` row is created by a
+  `security definer` trigger on `auth.users`, so a customer cannot insert or
+  update a row, let alone assign themselves `admin` or `super_admin`.
 
 ## 4. Required external configuration (not done here — needs the owner)
 
 1. Create the `samtill-commerce` Supabase project (separate from the POS project).
 2. Run, after review and approval, the SQL in
-   `db/migrations/0001_commerce_init.sql` (accounts extension,
-   `installer_releases`, `download_events`, `user_roles`, storage bucket, RLS)
-   — **no SQL was executed in this change**.
-3. Enable Email/Password sign-in; set the confirmation link to
-   `https://samtill.com/#/verify`; configure the email provider (never
-   committed here).
+   `db/migrations/0001_commerce_init.sql` (profiles + trigger, plans, orders,
+   subscriptions, entitlements, installer_releases, download_events,
+   webhook_events, audit_logs, the private `installers` bucket, and the RLS
+   hardening) — **no SQL was executed in this change**.
+3. Enable Email/Password sign-in and set the **Site URL** plus the email
+   confirmation redirect to the real production domain's verify route
+   (`https://<owner-chosen-domain>/#/verify`). **`samtill.com` does NOT
+   resolve in DNS** as of this writing, so the owner must choose and point
+   a real domain first. Configure the email provider (never committed
+   here).
 4. Set `DOWNLOAD_ACCESS_MODE=verified_account` on the API if SamTill wants
    verified accounts to download without a subscription (the default
    `entitlement` mode keeps the old behaviour).
@@ -147,17 +177,21 @@ database.
 
 ## 5. Tests
 
-`pnpm test` (Node test runner, `tests/run.ts`) grew from 68 to 120 passing tests:
+`pnpm test` (Node test runner, `tests/run.ts`) — **125 passing tests**:
 
 - `tests/account-logic.test.ts` — registration validation rules, gate defaults,
   hash-route helpers, auth-flow state machine (success, duplicate email,
-  unverified login, verification polling success/timeout, password-reset
-  confirmation handling).
+  unverified login, verification link exchange success/failure, password-reset
+  confirmation handling, resend).
 - `tests/download-flow.test.ts` — real `api/download.ts` handler executed with
-  stubbed `fetch`/env: entitlement mode requires a subscription; verified-account
-  mode requires an authenticated, email-verified user; anonymous token → 401;
-  missing installer file → `installer_unavailable`; signed-URL failure → 502;
-  the response redirects to the real `/releases/…exe` path.
+  stubbed `fetch`/env: entitlement mode requires an active entitlement row and
+  performs no auth-admin lookup; `verified_account` mode performs the
+  authoritative email-confirmation lookup and grants only confirmed accounts;
+  an unconfirmed address is denied with `email_unverified` and audited as
+  `denied_unverified_email`; a failed lookup fails closed (502); anonymous or
+  invalid token -> 401; missing installer -> `download_unavailable`; failed
+  audit write -> 503 with no link handed out; plus the pure
+  `decideVerifiedAccountDownload()` policy and its audit vocabulary.
 
 Not tested here (documented honestly): real email delivery, real Supabase
 sessions, and a real file download — these need the `samtill-commerce` project

@@ -35,7 +35,13 @@ export type DownloadDenyReason =
   | 'wrong_product'
   | 'inactive_status'
   | 'not_yet_active'
-  | 'expired';
+  | 'expired'
+  /**
+   * `verified_account` mode only: the signed-in customer's email address has
+   * not been confirmed yet. Produced when the authoritative Auth lookup says
+   * the address is unconfirmed.
+   */
+  | 'email_unverified';
 
 export type DownloadDecisionReason = 'granted' | DownloadDenyReason;
 
@@ -86,6 +92,24 @@ export function evaluateDownloadAccess(
   return {allowed: true, reason: 'granted', validTo: best.valid_to};
 }
 
+/**
+ * Build the `verified_account`-mode decision from an authoritative email
+ * confirmation lookup. Pure, so the policy is unit-tested:
+ *   - `undefined` → the lookup failed; deny WITHOUT recording an entitlement-
+ *     style reason (the caller surfaces a backend error instead).
+ *   - `false`      → the address is not confirmed; deny `email_unverified`.
+ *   - `true`       → confirmed; allow.
+ *
+ * This is download ACCESS ONLY. It is never a subscription, licence or
+ * payment confirmation.
+ */
+export function decideVerifiedAccountDownload(emailConfirmed: boolean | undefined): DownloadDecision {
+  if (emailConfirmed === true) {
+    return {allowed: true, reason: 'granted'};
+  }
+  return {allowed: false, reason: 'email_unverified'};
+}
+
 /** Map a decision to the `download_events.result` vocabulary (see SQL). */
 export function toDownloadEventResult(decision: DownloadDecision): string {
   switch (decision.reason) {
@@ -101,5 +125,7 @@ export function toDownloadEventResult(decision: DownloadDecision): string {
       return 'denied_expired';
     case 'inactive_status':
       return 'denied_inactive';
+    case 'email_unverified':
+      return 'denied_unverified_email';
   }
 }

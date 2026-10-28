@@ -1,13 +1,20 @@
 /**
  * Session state for the account screens.
  *
- * - Restores an existing session after a page refresh (getSession reads the
- *   persisted session and refreshes an expired access token when possible).
+ * - Restores an existing session after a page refresh.
+ * - Validates that session against the auth server with getUser() rather than
+ *   trusting the copy persisted in localStorage: a token that was revoked,
+ *   deleted or otherwise invalidated server-side resolves to "signed out" here
+ *   even while localStorage still holds it. getSession() alone would happily
+ *   hand back a stale cached session.
  * - Subscribes to auth state changes so sign-in, sign-out, verification and
  *   password recovery propagate to every mounted screen.
  * - When the commerce project is not configured, `session` stays null and
  *   `loading` resolves to false, so guarded screens can render their
  *   "not available" notice instead of hanging.
+ *
+ * NOTE: this is a UX guard, not a security boundary. The only real boundary is
+ * the server-side session check inside POST /api/download.
  */
 
 import {useCallback, useEffect, useState} from 'react';
@@ -43,15 +50,33 @@ export function useAccountSession(): AccountSessionState {
     let active = true;
     client.auth
       .getSession()
-      .then(({data}) => {
+      .then(async ({data}) => {
+        const persisted = data.session ?? null;
+        if (!persisted) {
+          if (active) setSession(null);
+          return;
+        }
+
+        // Trust but verify: getUser() round-trips to the auth server, so a
+        // session that was revoked, deleted or otherwise invalidated
+        // server-side resolves to signed-out here instead of being served
+        // from the stale localStorage copy.
+        const {data: userData, error} = await client.auth.getUser();
         if (!active) return;
-        setSession(data.session ?? null);
-        setLoading(false);
+        if (error || !userData?.user) {
+          setSession(null);
+          return;
+        }
+        // Keep the local session object (it carries the access token) but
+        // replace the user with the server-confirmed one.
+        setSession({...persisted, user: userData.user});
       })
       .catch(() => {
         if (!active) return;
         setSession(null);
-        setLoading(false);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
 
     const subscription = client.auth.onAuthStateChange((_event, next) => {

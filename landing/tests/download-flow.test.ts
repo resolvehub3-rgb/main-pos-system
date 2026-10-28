@@ -8,7 +8,10 @@
  *  - unconfigured backend fails closed (503) and only echoes variable names,
  *  - missing/invalid/expired sessions are rejected before any storage call,
  *  - default `entitlement` mode still denies customers without entitlements,
- *  - owner-set `verified_account` mode grants an audited signed URL,
+ *  - owner-set `verified_account` mode grants an audited signed URL ONLY
+ *    after an authoritative server-side email-confirmation lookup,
+ *  - an unconfirmed address is denied and audited as such (never granted),
+ *  - a failed confirmation lookup fails closed (no link, retryable error),
  *  - a missing installer release produces a clear 403 (not a fake link),
  *  - a failed audit write fails closed (no unaudited link),
  *  - the payment gates remain disabled,
@@ -20,6 +23,10 @@ import {bytesToBase64Url, utf8ToBytes} from '../api/_lib/codec.ts';
 import {getCommerceConfig} from '../api/_lib/env.ts';
 import {GET as statusGet} from '../api/status.ts';
 import {POST as downloadPost} from '../api/download.ts';
+import {
+  decideVerifiedAccountDownload,
+  toDownloadEventResult,
+} from '../api/_lib/entitlement.ts';
 import {
   classifyDownloadResponse,
   formatFileSize,
@@ -121,13 +128,34 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-/** Emulated commerce backend: PostgREST tables + storage signing. */
+/** Emulated commerce backend: PostgREST tables + storage signing + auth admin. */
 function backendRouter(options: {
   releases?: unknown[];
   entitlements?: unknown[];
   downloadEventsStatus?: number;
+  /**
+   * email_confirmed_at returned by the Auth Admin lookup, keyed by user id.
+   * Absent user → 404 (mirrors GoTrue), which the handler must treat as a
+   * backend error, not as access.
+   */
+  confirmedUsers?: Record<string, string | null>;
 }): StubRouter {
   return (url) => {
+    // Auth Admin API: GET /auth/v1/admin/users/{id}
+    const authMatch = url.match(/\/auth\/v1\/admin\/users\/([0-9a-f-]+)$/i);
+    if (authMatch) {
+      const id = authMatch[1];
+      const table = options.confirmedUsers ?? {};
+      if (!(id in table)) {
+        return jsonResponse({msg: 'User not found'}, 404);
+      }
+      const confirmedAt = table[id];
+      return jsonResponse({
+        id,
+        email: 'buyer@example.com',
+        email_confirmed_at: confirmedAt,
+      });
+    }
     if (url.includes('/rest/v1/installer_releases')) {
       return jsonResponse(options.releases ?? [RELEASE_ROW]);
     }
@@ -220,9 +248,45 @@ test('download: configuration rejects an unknown DOWNLOAD_ACCESS_MODE', async ()
 });
 
 // ---------------------------------------------------------------------------
-// Server handler: session requirements
+// verified_account access policy (pure)
 // ---------------------------------------------------------------------------
 
+test('verified_account policy: only a confirmed address is allowed', async () => {
+  const allowed = decideVerifiedAccountDownload(true);
+  assertEqual(allowed.allowed, true);
+  assertEqual(allowed.reason, 'granted');
+
+  const denied = decideVerifiedAccountDownload(false);
+  assertEqual(denied.allowed, false);
+  assertEqual(denied.reason, 'email_unverified');
+  assertEqual(toDownloadEventResult(denied), 'denied_unverified_email');
+
+  // undefined = "could not check" — must never be treated as access.
+  const unknown = decideVerifiedAccountDownload(undefined);
+  assertEqual(unknown.allowed, false);
+  assertEqual(unknown.reason, 'email_unverified');
+});
+
+test('verified_account policy: the audit vocabulary covers the new denial', async () => {
+  const result = toDownloadEventResult({allowed: false, reason: 'email_unverified'});
+  // Must match the CHECK constraint in db/migrations/0001_commerce_init.sql.
+  const allowedValues = [
+    'granted',
+    'denied_no_entitlement',
+    'denied_wrong_product',
+    'denied_not_yet_active',
+    'denied_expired',
+    'denied_inactive',
+    'denied_no_release',
+    'denied_rate_limited',
+    'denied_unverified_email',
+  ];
+  assert(allowedValues.includes(result), `audit value "${result}" is permitted by the schema`);
+});
+
+// ---------------------------------------------------------------------------
+// Server handler: session requirements
+// ---------------------------------------------------------------------------
 test('download: a request without a session is rejected before any storage call', async () => {
   await withEnv({}, async () => {
     const {value, calls} = await withFetchStub(backendRouter({}), () => downloadPost(downloadRequest()));
@@ -284,9 +348,11 @@ test('download: default entitlement mode denies a customer without entitlements'
 
 test('download: verified_account mode issues an audited signed URL with release metadata', async () => {
   await withEnv({DOWNLOAD_ACCESS_MODE: 'verified_account'}, async () => {
-    const token = await signSessionToken(nextUser());
-    const {value, calls} = await withFetchStub(backendRouter({releases: [RELEASE_ROW]}), () =>
-      downloadPost(downloadRequest(token)),
+    const user = nextUser();
+    const token = await signSessionToken(user);
+    const {value, calls} = await withFetchStub(
+      backendRouter({releases: [RELEASE_ROW], confirmedUsers: {[user]: '2026-01-01T00:00:00.000Z'}}),
+      () => downloadPost(downloadRequest(token)),
     );
     assertEqual(value.status, 200);
     const body = (await value.json()) as {
@@ -302,6 +368,10 @@ test('download: verified_account mode issues an audited signed URL with release 
     assertEqual(body.release.sha256, RELEASE_ROW.sha256.toLowerCase(), 'hash exposed for verification');
 
     assert(
+      calls.some((call) => call.url.includes('/auth/v1/admin/users/')),
+      'email confirmation is checked authoritatively server-side',
+    );
+    assert(
       !calls.some((call) => call.url.includes('/rest/v1/entitlements')),
       'entitlements are not consulted in verified_account mode',
     );
@@ -309,6 +379,67 @@ test('download: verified_account mode issues an audited signed URL with release 
     assert(
       audit !== undefined && audit.body !== undefined && audit.body.includes('"granted"'),
       'grant is audited',
+    );
+  });
+});
+
+test('download: verified_account mode denies an UNCONFIRMED address and audits it', async () => {
+  await withEnv({DOWNLOAD_ACCESS_MODE: 'verified_account'}, async () => {
+    const user = nextUser();
+    const token = await signSessionToken(user);
+    const {value, calls} = await withFetchStub(
+      // Confirmed timestamp is null → the address is not verified.
+      backendRouter({releases: [RELEASE_ROW], confirmedUsers: {[user]: null}}),
+      () => downloadPost(downloadRequest(token)),
+    );
+    assertEqual(value.status, 403);
+    const body = (await value.json()) as {error: string; message: string; reason?: string};
+    assertEqual(body.error, 'download_denied');
+    assertEqual(body.reason, 'email_unverified');
+    assert(body.message.includes('confirm your email'), 'tells the customer what to do next');
+    assert(
+      !calls.some((call) => call.url.includes('/storage/v1/object/sign/')),
+      'no link is issued to an unverified account',
+    );
+    const audit = calls.find((call) => call.url.includes('/rest/v1/download_events') && call.method === 'POST');
+    assert(
+      audit !== undefined && audit.body !== undefined && audit.body.includes('denied_unverified_email'),
+      'the refusal is audited with its own reason',
+    );
+  });
+});
+
+test('download: verified_account mode fails closed when the confirmation lookup errors', async () => {
+  await withEnv({DOWNLOAD_ACCESS_MODE: 'verified_account'}, async () => {
+    const user = nextUser();
+    const token = await signSessionToken(user);
+    const {value, calls} = await withFetchStub(
+      // No confirmedUsers entry → the router answers 404 for this user,
+      // which the handler must treat as "could not check", never as access.
+      backendRouter({releases: [RELEASE_ROW], confirmedUsers: {}}),
+      () => downloadPost(downloadRequest(token)),
+    );
+    assertEqual(value.status, 502);
+    const body = (await value.json()) as {error: string};
+    assertEqual(body.error, 'backend_unavailable');
+    assert(
+      !calls.some((call) => call.url.includes('/storage/v1/object/sign/')),
+      'an unverifiable account never receives a link',
+    );
+  });
+});
+
+test('download: entitlement mode does not require an email confirmation lookup', async () => {
+  await withEnv({DOWNLOAD_ACCESS_MODE: undefined}, async () => {
+    const user = nextUser();
+    const token = await signSessionToken(user);
+    const {calls} = await withFetchStub(
+      backendRouter({releases: [RELEASE_ROW], entitlements: []}),
+      () => downloadPost(downloadRequest(token)),
+    );
+    assert(
+      !calls.some((call) => call.url.includes('/auth/v1/admin/users/')),
+      'entitlement mode is unchanged: no auth-admin lookup',
     );
   });
 });
@@ -323,9 +454,11 @@ test('download: verified_account mode still requires a valid session', async () 
 
 test('download: a missing active release returns a clear "not available" error', async () => {
   await withEnv({DOWNLOAD_ACCESS_MODE: 'verified_account'}, async () => {
-    const token = await signSessionToken(nextUser());
-    const {value, calls} = await withFetchStub(backendRouter({releases: []}), () =>
-      downloadPost(downloadRequest(token)),
+    const user = nextUser();
+    const token = await signSessionToken(user);
+    const {value, calls} = await withFetchStub(
+      backendRouter({releases: [], confirmedUsers: {[user]: '2026-01-01T00:00:00.000Z'}}),
+      () => downloadPost(downloadRequest(token)),
     );
     assertEqual(value.status, 403);
     const body = (await value.json()) as {error: string; message: string};
@@ -340,9 +473,15 @@ test('download: a missing active release returns a clear "not available" error',
 
 test('download: fails closed when the audit row cannot be written', async () => {
   await withEnv({DOWNLOAD_ACCESS_MODE: 'verified_account'}, async () => {
-    const token = await signSessionToken(nextUser());
-    const {value} = await withFetchStub(backendRouter({releases: [RELEASE_ROW], downloadEventsStatus: 500}), () =>
-      downloadPost(downloadRequest(token)),
+    const user = nextUser();
+    const token = await signSessionToken(user);
+    const {value} = await withFetchStub(
+      backendRouter({
+        releases: [RELEASE_ROW],
+        confirmedUsers: {[user]: '2026-01-01T00:00:00.000Z'},
+        downloadEventsStatus: 500,
+      }),
+      () => downloadPost(downloadRequest(token)),
     );
     assertEqual(value.status, 503);
     const body = (await value.json()) as {error: string};

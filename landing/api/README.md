@@ -34,7 +34,7 @@ appears in a response; only variable *names* of missing config are echoed.
 | `/api/webhooks/paystack` | POST | **implemented** (signature + idempotency unit-tested), needs backend | Fails closed; see response policy below |
 | `/api/subscription` | GET | **implemented**, needs backend | Caller-scoped read |
 | `/api/subscription` | POST | **skeleton — 501 `not_implemented`** | `cancel` blocked pending the cancellation-policy decision |
-| `/api/download` | POST | **implemented**, needs backend | Access check (subscription by default; email-verified account if `DOWNLOAD_ACCESS_MODE=verified_account`) → 5-minute signed URL → fail-closed audit |
+| `/api/download` | POST | **implemented**, needs backend | Access check: `entitlement` (default, unchanged) = active entitlement required; `verified_account` (opt-in) = authoritative Auth Admin email-confirmation lookup (fail-closed 502 on lookup failure, 403 `email_unverified` when unconfirmed) → 5-minute signed URL → fail-closed audit |
 
 Legend:
 - **implemented** = complete code path, type-checked, unit-tested where the
@@ -49,8 +49,8 @@ Legend:
 | `tests/signature.test.ts` | HMAC-SHA512 against the **RFC 4231 §4.3** vector; tamper/wrong-secret/missing/malformed header rejection; case/whitespace tolerance |
 | `tests/session.test.ts` | Supabase JWT verification: valid, expired (+30 s skew), tampered payload, `alg:none` rejection, wrong secret, wrong issuer/audience, `anon` role rejection, missing `sub`/`exp`, `nbf` |
 | `tests/commerce-logic.test.ts` | Event reducer (create/extend/duplicate/amount-mismatch/cancellation/grace), entitlement download decisions, plan resolution (client-price rejection), rate limiter, dedupe-key derivation, month clamping |
-| `tests/account-logic.test.ts` | Registration field validation, account feature gates, hash-route helpers, register/login/verify/password-reset flow state machine (duplicates, unverified login, polling timeout) |
-| `tests/download-flow.test.ts` | `api/download.ts` handler with stubbed fetch/env: entitlement mode requires a subscription; `verified_account` mode requires an authenticated, email-verified user; anonymous token → 401; missing installer → `installer_unavailable`; signed-URL failure → 502; redirect targets the real `/releases/…exe` path. Also `api/status.ts` reports the active mode |
+| `tests/account-logic.test.ts` | Registration field validation, account feature gates, hash-route helpers, register/login/verify/password-reset flow state machine (duplicates, unverified login, verification link exchange success/failure, resend) |
+| `tests/download-flow.test.ts` | `api/download.ts` handler with stubbed fetch/env: entitlement mode requires an active entitlement row and performs no auth-admin lookup; `verified_account` mode performs the authoritative email-confirmation lookup and grants only confirmed accounts (unconfirmed → 403 `email_unverified`, audited `denied_unverified_email`; lookup failure → fail-closed 502); anonymous/expired token → 401; missing installer → `download_unavailable`; failed audit write → 503 with no link; pure `decideVerifiedAccountDownload()` policy + audit vocabulary. Also `api/status.ts` reports the active mode |
 
 Not tested locally (requires provisioned services — part of the future
 checklist): real Paystack test-mode checkout + webhook delivery, Supabase

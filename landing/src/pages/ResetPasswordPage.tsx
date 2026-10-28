@@ -31,7 +31,7 @@ type Phase =
 
 export default function ResetPasswordPage({route}: {route: ParsedRoute}) {
   const availability = accountAvailability(COMMERCE, readCommerceEnv());
-  const {loading, account} = useAccountSession();
+  const {loading, account, session} = useAccountSession();
   const [phase, setPhase] = useState<Phase>({status: 'preparing'});
   const [password, setPassword] = useState('');
   const [fieldError, setFieldError] = useState<string | undefined>(undefined);
@@ -45,7 +45,45 @@ export default function ResetPasswordPage({route}: {route: ParsedRoute}) {
   useEffect(() => {
     if (!availability.available) return;
 
-    // Already holding a session (recovery completed earlier in this tab).
+    // A recovery link in the URL always wins. Without this, arriving at
+    // #/reset-password while a DIFFERENT account is signed in would skip the
+    // emailed link entirely and call updateUser() against the wrong account.
+    // Exchanging the link replaces the current session with the recovery one,
+    // so the new password is guaranteed to apply to the address that asked
+    // for the reset.
+    if (pending) {
+      if (startedFor.current === paramsKey) return;
+      startedFor.current = paramsKey;
+
+      const pendingClient = getCommerceAuth();
+      if (!pendingClient) {
+        setPhase({status: 'failed', message: 'The account service is not configured on this site yet.'});
+        return;
+      }
+
+      let linkActive = true;
+      setPhase({status: 'preparing'});
+      verifyEmailAddress(createAuthProvider(pendingClient), pending)
+        .then((result) => {
+          if (!linkActive) return;
+          if (result.status === 'verified') {
+            setPhase({status: 'ready'});
+            return;
+          }
+          setPhase({status: 'failed', message: result.message});
+        })
+        .catch(() => {
+          if (!linkActive) return;
+          setPhase({status: 'failed', message: 'We could not open this reset link right now. Please request a new one.'});
+        });
+
+      return () => {
+        linkActive = false;
+      };
+    }
+
+    // No link in the URL. A recovery session already established earlier in
+    // this tab can still finish the job.
     if (account) {
       setPhase({status: 'ready'});
       return;
@@ -53,42 +91,10 @@ export default function ResetPasswordPage({route}: {route: ParsedRoute}) {
     if (loading) return;
 
     // No link in the URL and no session → step 1 required.
-    if (!pending) {
-      setPhase({
-        status: 'needs_link',
-        message: 'Open the password reset link from your email to choose a new password.',
-      });
-      return;
-    }
-
-    if (startedFor.current === paramsKey) return;
-    startedFor.current = paramsKey;
-
-    const client = getCommerceAuth();
-    if (!client) {
-      setPhase({status: 'failed', message: 'The account service is not configured on this site yet.'});
-      return;
-    }
-
-    let active = true;
-    setPhase({status: 'preparing'});
-    verifyEmailAddress(createAuthProvider(client), pending)
-      .then((result) => {
-        if (!active) return;
-        if (result.status === 'verified') {
-          setPhase({status: 'ready'});
-          return;
-        }
-        setPhase({status: 'failed', message: result.message});
-      })
-      .catch(() => {
-        if (!active) return;
-        setPhase({status: 'failed', message: 'We could not open this reset link right now. Please request a new one.'});
-      });
-
-    return () => {
-      active = false;
-    };
+    setPhase({
+      status: 'needs_link',
+      message: 'Open the password reset link from your email to choose a new password.',
+    });
   }, [availability.available, account, loading, pending, paramsKey]);
 
   if (!availability.available) {
@@ -171,6 +177,11 @@ export default function ResetPasswordPage({route}: {route: ParsedRoute}) {
     );
   }
 
+  // The address the new password will apply to. After the recovery link is
+  // exchanged this is the link owner's address — shown so the customer can
+  // see exactly which account they are about to change.
+  const targetEmail = session?.user?.email ?? account?.email;
+
   return (
     <AccountShell
       title="Choose a new password"
@@ -183,6 +194,12 @@ export default function ResetPasswordPage({route}: {route: ParsedRoute}) {
     >
       <form onSubmit={handleSubmit} noValidate>
         {banner && <StatusBanner tone={banner.tone}>{banner.message}</StatusBanner>}
+
+        {targetEmail && (
+          <p className="mb-4 rounded-lg bg-slate-50 px-4 py-3 text-sm text-navy-700">
+            Changing the password for <strong className="font-bold">{targetEmail}</strong>.
+          </p>
+        )}
 
         <TextField
           id="new-password"

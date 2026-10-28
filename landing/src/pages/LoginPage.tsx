@@ -5,7 +5,7 @@ import StatusBanner, {type BannerTone} from '../components/account/StatusBanner'
 import TextField from '../components/account/TextField';
 import {COMMERCE} from '../config/commerce';
 import {accountAvailability} from '../lib/availability';
-import {signInToAccount} from '../lib/authFlow';
+import {resendConfirmation, signInToAccount} from '../lib/authFlow';
 import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
 import {nextRouteAfterSignIn, type ParsedRoute} from '../lib/hashRoute';
 import {navigateTo} from '../lib/navigation';
@@ -30,6 +30,11 @@ export default function LoginPage({route}: {route: ParsedRoute}) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [banner, setBanner] = useState<{tone: BannerTone; message: string} | null>(null);
+  // Set when sign-in failed specifically because the address is unconfirmed,
+  // so the screen can offer a one-click "resend the link" action instead of
+  // leaving the customer stuck at a dead end.
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
 
   // Already signed in (or just signed in) → go to the requested screen.
   useEffect(() => {
@@ -59,6 +64,8 @@ export default function LoginPage({route}: {route: ParsedRoute}) {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setBanner(null);
+    setUnverifiedEmail(null);
+    setResendState('idle');
 
     const client = getCommerceAuth();
     if (!client) {
@@ -83,11 +90,33 @@ export default function LoginPage({route}: {route: ParsedRoute}) {
     }
     if (result.status === 'error') {
       setBanner({tone: 'error', message: result.message});
+      // Offer a resend only when the provider explicitly said the address is
+      // unconfirmed — never guess from a generic failure.
+      if (result.kind === 'email_not_confirmed') setUnverifiedEmail(email.trim());
       return;
     }
     // Signed in — useAccountSession picks the session up and the effect above
     // navigates to the requested screen.
     setBanner({tone: 'success', message: 'Signed in. Taking you to your account…'});
+  }
+
+  async function handleResend() {
+    if (!unverifiedEmail || resendState !== 'idle') return;
+    const client = getCommerceAuth();
+    if (!client) return;
+
+    setResendState('sending');
+    const result = await resendConfirmation(createAuthProvider(client), unverifiedEmail, {
+      redirectTo: `${window.location.origin}/#/verify`,
+    });
+
+    if (result.status === 'sent') {
+      setResendState('sent');
+      setBanner({tone: 'info', message: result.message});
+      return;
+    }
+    setResendState('idle');
+    setBanner({tone: 'error', message: result.message});
   }
 
   if (loading && !account) {
@@ -156,6 +185,26 @@ export default function LoginPage({route}: {route: ParsedRoute}) {
             Forgot your password?
           </a>
         </p>
+
+        {unverifiedEmail && (
+          <div className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-center text-sm">
+            <p className="text-navy-700">
+              Your email address has not been confirmed yet, so you cannot sign in until it is.
+            </p>
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resendState !== 'idle'}
+              className="mt-2 font-bold text-amber-700 underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              {resendState === 'sending'
+                ? 'Sending…'
+                : resendState === 'sent'
+                  ? 'Confirmation email sent ✓'
+                  : 'Resend the confirmation email →'}
+            </button>
+          </div>
+        )}
       </form>
     </AccountShell>
   );
