@@ -5,6 +5,12 @@ export const SITE = {
   company: 'SamTeck Digital',
   tagline: 'Supermarket & retail point of sale',
   logoSrc: '/assets/logo.png',
+  /**
+   * Public URL of the deployed SamTill web/PWA application.
+   * Leave '' until the owner confirms the address — nothing is linked or
+   * claimed while it is empty.
+   */
+  webAppUrl: '',
   /** Set true once the site is approved for public launch. */
   siteApprovedForLaunch: false,
   previewNotice:

@@ -35,6 +35,20 @@ export function readFlag(name: string): boolean {
   return (readEnv(name) ?? '').toLowerCase() === 'true';
 }
 
+/**
+ * Who may receive an installer download link:
+ * - `entitlement`      (default): only customers with an active paid
+ *                       entitlement — the pre-existing behaviour, unchanged
+ *                       until the operator opts in to the other mode;
+ * - `verified_account`: any customer who can sign in to the commerce project
+ *                       (which, with "Confirm email" enabled there, means the
+ *                       address was verified). Used while payments are
+ *                       postponed so the registration → verify → login →
+ *                       download journey works. Grants the installer FILE
+ *                       only — it is NOT a POS licence activation.
+ */
+export type DownloadAccessMode = 'entitlement' | 'verified_account';
+
 export interface CommerceConfig {
   /** Commerce Supabase project URL, no trailing slash. */
   supabaseUrl: string;
@@ -67,6 +81,12 @@ export interface CommerceConfig {
   checkoutEnabled: boolean;
   /** Gate for publishing prices through /api/plans. Off until approval. */
   publishPrices: boolean;
+  /**
+   * Server-side access mode for POST /api/download. Defaults to
+   * `entitlement` (fail-closed to paid customers only). See
+   * DownloadAccessMode above and docs/03-environment-variables.md.
+   */
+  downloadAccessMode: DownloadAccessMode;
   /** Optional salt for hashing client IPs in audit/download records. */
   auditHashSalt?: string;
 }
@@ -157,6 +177,19 @@ export function getCommerceConfig(): ConfigResult {
     invalid.push('INSTALLER_BUCKET');
   }
 
+  // Download access mode: explicit opt-in, safe default. An unknown value is
+  // a configuration error (fail closed), never a silent fallback.
+  let downloadAccessMode: DownloadAccessMode = 'entitlement';
+  const downloadModeRaw = readEnv('DOWNLOAD_ACCESS_MODE');
+  if (downloadModeRaw !== undefined) {
+    const normalized = downloadModeRaw.toLowerCase();
+    if (normalized === 'entitlement' || normalized === 'verified_account') {
+      downloadAccessMode = normalized;
+    } else {
+      invalid.push('DOWNLOAD_ACCESS_MODE');
+    }
+  }
+
   let downloadLinkTtlSeconds = DEFAULT_DOWNLOAD_TTL;
   const ttlRaw = readEnv('DOWNLOAD_LINK_TTL_SECONDS');
   if (ttlRaw !== undefined) {
@@ -187,6 +220,7 @@ export function getCommerceConfig(): ConfigResult {
       downloadLinkTtlSeconds,
       checkoutEnabled: readFlag('CHECKOUT_ENABLED'),
       publishPrices: readFlag('PUBLISH_PRICES'),
+      downloadAccessMode,
       auditHashSalt: readEnv('AUDIT_HASH_SALT'),
     },
   };

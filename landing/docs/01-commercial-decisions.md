@@ -238,15 +238,16 @@ Docs/02 refers to these numbers. Statuses updated by this revision.
 
 ---
 
-## 6. Gating controls (unchanged, all currently OFF)
+## 6. Gating controls (still OFF — the account journey ships behind them)
 
 | Control | Where it lives | Current value | What it gates |
 | --- | --- | --- | --- |
 | `PRICING_APPROVED` | `src/config/pricing.ts` | `false` | Showing draft prices as approved |
-| `COMMERCE.accountEnabled / paymentsEnabled / downloadEnabled` | `src/config/commerce.ts` | all `false` | Customer-area status rows |
+| `COMMERCE.accountEnabled / paymentsEnabled / downloadEnabled` | `src/config/commerce.ts` | all `false` | The account/download pages and nav links (`/#/register`, `/#/login`, `/#/download`, …) render "not available" notices; no public production access |
 | `PUBLISH_PRICES=true` | Vercel env (server) | unset (off) | `GET /api/plans` — else **403 `pricing_not_approved`** |
 | `CHECKOUT_ENABLED=true` | Vercel env (server) | unset (off) | `POST /api/checkout` — else **503 `checkout_disabled`** |
 | `ALLOW_LIVE_PAYMENTS=true` | Vercel env (server) | unset (off) | Accepting any Paystack key not `sk_test_*` |
+| `DOWNLOAD_ACCESS_MODE` | Vercel env (server) | unset → **`entitlement`** | `POST /api/download`: `entitlement` = subscription required (unchanged); `verified_account` (owner decision, doc 05 §1) = any email-verified account may download, **without** implying a licence |
 | Plan rows in `plans` | SQL | **no rows seeded** | Anything purchasable at all |
 
 Checkout additionally rejects client-supplied price fields

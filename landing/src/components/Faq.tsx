@@ -1,6 +1,10 @@
+import {COMMERCE} from '../config/commerce';
+import {downloadAvailability} from '../lib/availability';
+import {readCommerceEnv} from '../lib/commerceClient';
 import {Reveal} from './Reveal';
 
-const FAQS = [
+function buildFaqs(downloadOpen: boolean): Array<{q: string; a: string}> {
+  return [
   {
     q: 'What is SamTill?',
     a: 'SamTill is a point-of-sale and retail management application by SamTeck Digital for supermarkets and shops in Ghana. It covers barcode checkout, product and category management, stock movement records, receipt printing, sales reporting and a customer-facing display.',
@@ -19,7 +23,9 @@ const FAQS = [
   },
   {
     q: 'Can I download and install it myself?',
-    a: 'Not yet. A download will only be published once the owner has approved a verified, secure installer. Until then, installation is arranged with SamTeck Digital as part of setup.',
+    a: downloadOpen
+      ? 'Yes — create or sign in to your SamTill account on this site and open the download page to get a short-lived link to the verified Windows installer for your account. SamTeck Digital can still help with installation and setup in your shop.'
+      : 'Not yet. A download will only be published once the owner has approved a verified, secure installer. Until then, installation is arranged with SamTeck Digital as part of setup.',
   },
   {
     q: 'What hardware do I need?',
@@ -33,9 +39,12 @@ const FAQS = [
     q: 'What happens to my business data?',
     a: 'Your shop data belongs to you. Details of how data is stored and backed up for your installation are confirmed in writing during setup, before you activate a licence.',
   },
-];
+  ];
+}
 
 export default function Faq() {
+  const faqs = buildFaqs(downloadAvailability(COMMERCE, readCommerceEnv()).available);
+
   return (
     <section id="faq" className="bg-navy-950 py-20 lg:py-28">
       <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
@@ -49,7 +58,7 @@ export default function Faq() {
         </Reveal>
 
         <div className="mt-10 space-y-3">
-          {FAQS.map((item, index) => (
+          {faqs.map((item, index) => (
             <Reveal key={item.q} delayMs={index * 50}>
               <details className="group rounded-xl border border-navy-700 bg-navy-900/60 transition-colors open:border-amber-500/50">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-base font-semibold text-white [&::-webkit-details-marker]:hidden">

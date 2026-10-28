@@ -14,11 +14,14 @@ SamTill POS application in the repository root.
   sharing with the POS app.
 - Build output goes to `landing/dist` and never touches the root `dist/`,
   `dist-electron/`, `release/` or the Electron packaging config.
-- No Supabase client, no `.env` usage, no database, **no provisioned backend,
-  no API keys** — the commerce API in `api/` is written against the browser
-  WebCrypto/fetch APIs and fails closed (HTTP 503) until an owner-approved
-  commerce project and its environment variables exist (nothing is set, and
-  no secrets are stored in this repo, ever).
+- No database, **no provisioned backend, no API keys** — the commerce API in
+  `api/` fails closed (HTTP 503) until an owner-approved commerce project and
+  its environment variables exist (nothing is set, and no secrets are stored in
+  this repo, ever). The account UI ships a Supabase **auth client**
+  (`@supabase/supabase-js`) that is only ever configured with the commerce
+  project's publishable anon key via `VITE_COMMERCE_SUPABASE_URL` /
+  `VITE_COMMERCE_SUPABASE_ANON_KEY`, and only becomes reachable when the
+  account feature flags are switched on.
 - The POS app, its Supabase project and its `.env` are never read, copied or
   modified from here; the commerce system is designed for its own future,
   separate Supabase project.
@@ -33,16 +36,22 @@ SamTill POS application in the repository root.
 | Architecture & test report | `docs/02-commerce-architecture.md` | prepared |
 | Environment variable names (no values) | `docs/03-environment-variables.md` | prepared; none set anywhere |
 | Installer delivery & licensing | `docs/04-installer-delivery-and-licensing.md` | prepared; installer never uploaded |
+| Customer journey (register → verify → login → download) | `docs/05-customer-journey.md` | implemented behind feature flags |
 | API handlers (status/plans/checkout/verify/subscription/download/webhook) | `api/` | implemented, fail-closed, unit-tested |
 | Database schema + RLS | `db/migrations/0001_commerce_init.sql` | prepared, **never executed** |
-| Unit tests | `tests/` | 68 tests, no network/database |
+| Account UI (register / verify / login / reset / account / download) | `src/pages/*Page.tsx`, `src/lib/authFlow.ts` | implemented, flags `false` |
+| Unit tests | `tests/` | 120 tests, no network/database |
 | Site preview section (inert) | `src/components/CommercePreview.tsx`, `src/config/commerce.ts` | all capability flags `false` |
 
-There is no checkout button, no working download and no registration form on
-the site: the preview section shows status rows only. Prices remain flagged
-as drafts (`PRICING_APPROVED = false`), and the API independently refuses
-checkout (`CHECKOUT_ENABLED` unset) — the site cannot enable payments on its
-own.
+There is no checkout button and no working download on the public site. The
+register/login/verify/account/download pages exist at hash routes
+(`/#/register`, `/#/login`, `/#/verify`, `/#/forgot-password`,
+`/#/reset-password`, `/#/account`, `/#/download`) but are hidden and show a
+"not available" notice while `COMMERCE.accountEnabled` /
+`COMMERCE.downloadEnabled` are `false` in `src/config/commerce.ts` — they are
+for local testing until the owner flips those flags. Prices remain flagged as
+drafts (`PRICING_APPROVED = false`), and the API independently refuses checkout
+(`CHECKOUT_ENABLED` unset) — the site cannot enable payments on its own.
 
 ## Development
 
@@ -109,6 +118,13 @@ pnpm build
 3. Privacy Policy and Terms of Service texts are approved.
 4. `SITE.siteApprovedForLaunch` in `src/config/site.ts` is set to `true`
    (removes the preview banner).
+5. For the customer-account journey only: the `samtill-commerce` Supabase
+   project exists, its migration has been reviewed and run, email confirmation
+   is configured, `VITE_COMMERCE_SUPABASE_URL` / `VITE_COMMERCE_SUPABASE_ANON_KEY`
+   are set, and `COMMERCE.accountEnabled` / `COMMERCE.downloadEnabled` are
+   flipped in `src/config/commerce.ts` (see `docs/05-customer-journey.md`).
+   `DOWNLOAD_ACCESS_MODE` on the API decides whether downloads need a
+   subscription (default) or just a verified account.
 
 No download link may be published until the owner approves a verified,
 secure installer. No payment, registration or licensing claims may be added

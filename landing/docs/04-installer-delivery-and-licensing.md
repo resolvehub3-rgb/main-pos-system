@@ -48,7 +48,10 @@ run locally on 2026-10-27 — both size and hash match the inactive seed row in
 ## 3. Download flow (implemented server-side)
 
 `POST /api/download` (authenticated, 6/10 min per user):
-1. Require an **active** entitlement (`valid_to` in the future; no grace).
+1. Check access via `DOWNLOAD_ACCESS_MODE`: **`entitlement`** (default) requires
+   an **active** entitlement (`valid_to` in the future; no grace); the opt-in
+   **`verified_account`** mode instead accepts any email-verified account (owner
+   decision, doc 01 §6). Neither mode makes registration a licence.
 2. Server chooses the newest **active** `installer_releases` row — the client
    cannot select a version or path.
 3. Write the `download_events` audit row **first**; if that write fails,
@@ -56,6 +59,11 @@ run locally on 2026-10-27 — both size and hash match the inactive seed row in
 4. Return a storage signed URL with TTL ≤ `DOWNLOAD_LINK_TTL_SECONDS`
    (default 300 s), plus `version`, `size_bytes`, `sha256`.
 5. Denials are audited best-effort.
+
+The customer-facing download page (`/#/download`, doc 05) consumes exactly this
+endpoint: it shows the version/size/SHA-256 returned by the API (never
+hard-coded in the client), streams the file with real progress, and explains
+that this is the Windows installer — distinct from the web/PWA app.
 
 ### Client-side integrity check (for the customer)
 After download, the file's SHA-256 must equal the value returned by the API

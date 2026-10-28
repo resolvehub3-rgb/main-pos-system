@@ -3,7 +3,8 @@
 **No secrets are stored in this repository.** This file lists the variable
 *names* the commerce API expects, where they live, and what each one does.
 Values are entered only in the Vercel project settings (server-side) and —
-for the publishable key only — never at all until the client needs it.
+for the publishable key only — in the Vercel **frontend** env vars once the
+account UI is enabled (see the client section below).
 
 Rules enforced in code (`api/_lib/env.ts`):
 
@@ -33,8 +34,23 @@ Rules enforced in code (`api/_lib/env.ts`):
 | `PUBLISH_PRICES` | **approval gate** | plans | Literal `true` allows `GET /api/plans` to return prices (else 403). Only after doc 01 is approved. |
 | `ALLOW_LIVE_PAYMENTS` | no (default off) | config validation | Must be explicitly `true` before a `sk_live_…` key is accepted. Keep unset until a deliberate live launch. |
 | `AUDIT_HASH_SALT` | no | download, audit | Salt for `SHA-256(salt:ip)` in audit rows. If unset, `ip_hash` is stored as `null` (no IP recorded at all). |
+| `DOWNLOAD_ACCESS_MODE` | no (default `entitlement`) | download, status | Who may request a download session. `entitlement` (default, unchanged): authenticated **subscription** required. `verified_account`: any **email-verified** account (owner decision, see doc 01 §6). Any other value fails config validation with 503. |
 | `RESEND_API_KEY` | no (future) | not implemented | Reserved for renewal/OTP emails when email sending is approved and built. |
 | `EMAIL_FROM` | no (future) | not implemented | Sender address for the above. |
+
+## Client-side (Vercel → Environment Variables, inlined into the JS bundle)
+
+These are the **only** variables the browser bundle may contain. Both are
+publishable, never secret. While `accountEnabled`/`downloadEnabled` are `false`
+in `src/config/commerce.ts` these are not needed at all — leave them unset.
+
+| Name | Required | Used by | Purpose / validation |
+| --- | --- | --- | --- |
+| `VITE_COMMERCE_SUPABASE_URL` | yes, once accounts are enabled | `src/lib/supabaseAdapter.ts` | Base URL of the **dedicated commerce** Supabase project (never the POS project). Must be `https://` (localhost allowed for dev). |
+| `VITE_COMMERCE_SUPABASE_ANON_KEY` | yes, once accounts are enabled | `src/lib/supabaseAdapter.ts` | The commerce project's **anon / publishable** key (`sb_publishable_…` or JWT). The service-role key must never be given to the client. |
+
+Missing client config is handled gracefully: account pages show a
+"not available" notice instead of crashing, and the API keeps working.
 
 ## Preview vs production
 
@@ -42,7 +58,9 @@ Rules enforced in code (`api/_lib/env.ts`):
 | --- | --- | --- |
 | Paystack key | `sk_test_…` (only option while `ALLOW_LIVE_PAYMENTS` is unset) | test key until a deliberate live switch |
 | `CHECKOUT_ENABLED` / `PUBLISH_PRICES` | leave **unset** | set only after doc 01 approval |
+| `DOWNLOAD_ACCESS_MODE` | unset (defaults to `entitlement`) | `verified_account` only if SamTill enables account-gated downloads (doc 01 §6) |
 | Supabase project | a **scratch** commerce project (never the POS project) | the dedicated `samtill-commerce` project |
+| `VITE_COMMERCE_*` | scratch project's URL + anon key | `samtill-commerce` URL + anon key, set only when accounts go live |
 | Webhook URL | not registered | `https://<your-domain>/api/webhooks/paystack` (Paystack dashboard) |
 
 ## What must never happen

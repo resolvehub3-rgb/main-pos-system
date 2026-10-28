@@ -60,14 +60,24 @@ an in-flight payment can always be confirmed.
 
 ### Installer download (`POST /api/download`)
 ```
-authenticated user
-  → active entitlement?            (deny otherwise, best-effort audit)
+authenticated user (Supabase access token in Authorization header)
+  → DOWNLOAD_ACCESS_MODE gate:
+      entitlement (default)      → active entitlement? (deny otherwise)
+      verified_account (opt-in)  → email_confirmed_at present? (deny otherwise)
+                                   — owner decision (doc 01 §6, doc 05); this is
+                                   download access, NOT a licence
   → newest active installer_releases row (server chooses; client cannot pick)
   → storage signed URL, TTL ≤ DOWNLOAD_LINK_TTL_SECONDS (default 300 s)
   → download_events audit row MUST be written first (503 audit_unavailable
     if it fails — no unaudited downloads)
   → response includes version, size, sha256 for client-side verification
 ```
+
+The customer-facing implementation of the register → verify → login → download
+journey lives in the landing site (`src/pages/`, `src/lib/authFlow.ts`,
+`src/lib/downloadClient.ts`) and is documented in **doc 05**. It is shipped
+behind the `COMMERCE.accountEnabled` / `COMMERCE.downloadEnabled` flags (both
+`false`).
 
 ## 3. Schema summary (`db/migrations/0001_commerce_init.sql`)
 

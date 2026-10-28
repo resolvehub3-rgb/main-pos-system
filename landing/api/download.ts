@@ -2,16 +2,17 @@
  * POST /api/download — issue a short-lived signed URL for the installer.
  *
  * STATUS: implemented; requires the commerce backend (503 until configured)
- *         and a signed-in customer with an active entitlement. Not yet
- *         exercised against live storage — see the checklist in
- *         docs/02-commerce-architecture.md.
+ *         and a signed-in customer. Access is decided by DOWNLOAD_ACCESS_MODE
+ *         (`entitlement` by default; `verified_account` is an explicit
+ *         owner opt-in while payments are postponed). Not yet exercised
+ *         against live storage — see docs/02-commerce-architecture.md and
+ *         docs/05-customer-journey.md.
  *
  * AUTHORISATION FLOW (all decisions server-side; the request body is
  * ignored — the client cannot influence any step):
  *   1. require a valid commerce session (Bearer token),
  *   2. rate limit per user (6 links / 10 minutes),
- *   3. evaluate entitlements for `samtill-pos`: active status AND
- *      now within [valid_from, valid_to) -> otherwise 403 with a reason,
+ *   3. decide access by DOWNLOAD_ACCESS_MODE (server-side, see below),
  *   4. load the current ACTIVE release (version, path, SHA-256 chosen by
  *      the server, never by the client),
  *   5. mint a signed URL valid for DOWNLOAD_LINK_TTL_SECONDS (default 300 s)
@@ -20,6 +21,17 @@
  *      cannot be written, no URL is returned,
  *   7. return the URL plus release metadata (version, size, SHA-256) so the
  *      customer can verify the file after download.
+ *
+ * ACCESS MODES (env DOWNLOAD_ACCESS_MODE, default `entitlement`):
+ *   - `entitlement`      → active paid entitlement required (original
+ *                          behaviour; deny reasons audited as before);
+ *   - `verified_account` → any signed-in commerce customer may download the
+ *                          installer FILE while payments are postponed, so
+ *                          the register → verify → sign in → download
+ *                          journey works. Requires "Confirm email" in the
+ *                          commerce project (an unconfirmed address cannot
+ *                          obtain a session). This is NOT a POS licence
+ *                          activation and charges nothing.
  *
  * Denied attempts are audited too (best-effort) so refused downloads are
  * visible in review.
@@ -107,14 +119,21 @@ export async function POST(request: Request): Promise<Response> {
   if (!rate.allowed) return rateLimited(rate.retryAfterSeconds);
 
   const now = new Date();
-  let entitlements: EntitlementRowFull[];
   let decision: ReturnType<typeof evaluateDownloadAccess>;
-  try {
-    entitlements = await loadEntitlementsForUser(config, userId);
-    decision = evaluateDownloadAccess(entitlements, {now});
-  } catch (cause) {
-    console.error(`commerce: download entitlement load failed: ${String(cause)}`);
-    return apiError(502, 'backend_unavailable', 'Could not check your access right now. Please try again shortly.');
+  if (config.downloadAccessMode === 'verified_account') {
+    // Owner-enabled mode: every signed-in customer of the commerce project
+    // may fetch the installer FILE (session + rate limit + audit above/below
+    // still apply). Email verification is enforced by the project's
+    // "Confirm email" setting — an unconfirmed address never gets a session.
+    decision = {allowed: true, reason: 'granted'};
+  } else {
+    try {
+      const entitlements: EntitlementRowFull[] = await loadEntitlementsForUser(config, userId);
+      decision = evaluateDownloadAccess(entitlements, {now});
+    } catch (cause) {
+      console.error(`commerce: download entitlement load failed: ${String(cause)}`);
+      return apiError(502, 'backend_unavailable', 'Could not check your access right now. Please try again shortly.');
+    }
   }
 
   let release: ReleaseRow | null = null;

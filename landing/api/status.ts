@@ -41,6 +41,9 @@ export function GET(request: Request): Response {
       publishPrices: readFlag('PUBLISH_PRICES'),
       allowLivePayments: readFlag('ALLOW_LIVE_PAYMENTS'),
     },
+    // Access mode for POST /api/download. Reported for reviewers only; it
+    // takes effect solely when the backend is fully configured.
+    downloadAccessMode: configResult.ok ? configResult.config.downloadAccessMode : 'entitlement',
     endpoints: ENDPOINTS,
     documentation: [
       'landing/docs/01-commercial-decisions.md',

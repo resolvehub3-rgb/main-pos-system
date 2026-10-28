@@ -12,6 +12,7 @@
     "test": "node tests/run.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1"
   },
