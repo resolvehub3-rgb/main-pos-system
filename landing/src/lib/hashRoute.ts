@@ -23,6 +23,7 @@ export const ACCOUNT_ROUTES = [
   '/reset-password',
   '/account',
   '/checkout',
+  '/admin',
 ] as const;
 
 export type AccountRoute = (typeof ACCOUNT_ROUTES)[number];

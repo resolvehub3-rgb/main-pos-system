@@ -1,11 +1,33 @@
-# 05 — Customer Journey (Register → Verify → Login → Download)
+# 05 — Customer Journey (Register → Verify → Login → Approval → Account)
 
-**Status:** Implemented behind feature flags — `accountEnabled = false` and
-`downloadEnabled = false` in production until SamTill activates it (see the launch
-checklist below). No production Supabase project exists yet; nothing is live.
+**Status:** The customer-account flow is implemented and **approval-gated**.
+`COMMERCE.accountEnabled` is now `true`, but the account screens stay hidden
+until a real `samtill-commerce` Supabase project is configured
+(`VITE_COMMERCE_SUPABASE_URL` / `VITE_COMMERCE_SUPABASE_ANON_KEY`) — so a
+deployment with no backend never shows a form it cannot honour. No production
+Supabase project exists yet; nothing is live.
 
-This document is the canonical reference for the customer-account half of the
-commerce platform: what the customer sees, which files implement each step, what
+**Approval workflow (added).** Every new registration starts at
+`approval_status = 'pending'`. After verifying email and signing in, the
+customer lands on a **"waiting for approval"** screen instead of the dashboard.
+A super-admin approves or rejects the account at `#/admin`; approving fires a
+database trigger that emails the customer (pg_net → Resend, configured in the
+`app_settings` table) and flips the customer's dashboard open **in realtime**
+(Supabase Realtime on `profiles`, RLS-scoped to their own row). Approved
+customers can also **request setup** help. See `db/migrations/0002_account_approval.sql`
+and `db/README.md` for the schema, the admin bootstrap and the email config.
+
+> **Historical sections below.** Steps and file references that describe the
+> former desktop **installer download** flow (`DownloadPage.tsx`,
+> `downloadClient.ts`, `api/download.ts`, `downloadEnabled`,
+> `DOWNLOAD_ACCESS_MODE`, `installer_releases`) refer to a feature that was
+> **removed** when SamTill shipped as a web/PWA app (no desktop installer is
+> produced any more). Those sections are retained as audit history and are
+> pending owner review — they are not current behaviour. The live, canonical
+> operational reference for accounts/approval is `db/README.md`.
+
+This document is the reference for the customer-account half of the commerce
+platform: what the customer sees, which files implement each step, what
 external configuration is still required, and how the flow was tested.
 
 ## 1. The journey

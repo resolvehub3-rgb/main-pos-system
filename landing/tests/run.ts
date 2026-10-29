@@ -11,6 +11,7 @@ import './signature.test.ts';
 import './session.test.ts';
 import './commerce-logic.test.ts';
 import './account-logic.test.ts';
+import './approval-logic.test.ts';
 import './status.test.ts';
 import './checkout-flow.test.ts';
 import {runAll} from './harness.ts';

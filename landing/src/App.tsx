@@ -17,6 +17,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import AccountPage from './pages/AccountPage';
 import CheckoutPage from './pages/CheckoutPage';
+import AdminPage from './pages/AdminPage';
 import {SITE} from './config/site';
 import {isAccountRoute, type AccountRoute, type ParsedRoute} from './lib/hashRoute';
 import {navigateTo} from './lib/navigation';
@@ -53,6 +54,8 @@ function renderAccountScreen(route: ParsedRoute & {path: AccountRoute}) {
       return <AccountPage />;
     case '/checkout':
       return <CheckoutPage />;
+    case '/admin':
+      return <AdminPage />;
   }
 }
 

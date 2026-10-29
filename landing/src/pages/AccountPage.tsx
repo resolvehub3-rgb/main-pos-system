@@ -7,6 +7,16 @@ import {PACKAGES} from '../config/pricing';
 import {SITE} from '../config/site';
 import {accountAvailability, checkoutAvailability} from '../lib/availability';
 import {resendConfirmation} from '../lib/authFlow';
+import {
+  approvalView,
+  canRequestSetup,
+  fetchApprovalStatus,
+  fetchIsAdmin,
+  hasOpenSetupRequest,
+  requestSetup,
+  subscribeToApproval,
+  type ApprovalStatus,
+} from '../lib/accountStatus';
 import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
 import {fetchMyAccess, type AccessResult} from '../lib/checkoutClient';
 import {navigateTo} from '../lib/navigation';
@@ -36,8 +46,47 @@ export default function AccountPage() {
   const [resending, setResending] = useState(false);
   const [access, setAccess] = useState<AccessResult | null>(null);
 
+  const client = getCommerceAuth();
+  const userId = account?.userId ?? '';
+  // null = still loading; drives the waiting / approved / rejected screens.
+  const [approval, setApproval] = useState<ApprovalStatus | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [setupState, setSetupState] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle');
+  const [setupNote, setSetupNote] = useState('');
+  const [hasOpenRequest, setHasOpenRequest] = useState<boolean | null>(null);
+
   const accessToken = account?.accessToken ?? '';
   const apiBase = readCommerceEnv().apiBase;
+
+  // Load the customer's approval status, then watch it live so the dashboard
+  // unlocks (or a rejection appears) the instant an admin decides — no reload.
+  useEffect(() => {
+    if (!client || !userId) {
+      setApproval(null);
+      setIsAdmin(false);
+      return;
+    }
+    let active = true;
+
+    void fetchApprovalStatus(client, userId).then((result) => {
+      if (!active) return;
+      setApproval(result.ok ? result.status : 'unknown');
+    });
+    void fetchIsAdmin(client).then((value) => {
+      if (active) setIsAdmin(value);
+    });
+    void hasOpenSetupRequest(client).then((value) => {
+      if (active) setHasOpenRequest(value);
+    });
+
+    const unsubscribe = subscribeToApproval(client, userId, (status) => {
+      if (active) setApproval(status);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [client, userId]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -89,10 +138,10 @@ export default function AccountPage() {
     );
   }
 
-  const client = getCommerceAuth();
   const sessionUserEmail = account.email ?? '';
   // The provider only sets email_confirmed_at once verification succeeded.
   const emailConfirmed = Boolean(session?.user?.email_confirmed_at);
+  const view = approvalView(approval);
 
   async function handleResend() {
     if (!client || !sessionUserEmail) return;
@@ -111,6 +160,141 @@ export default function AccountPage() {
     await signOut();
     setBanner({tone: 'info', message: 'You have been signed out.'});
   }
+
+  async function handleRequestSetup() {
+    if (!client) return;
+    setSetupState('submitting');
+    const result = await requestSetup(client, setupNote);
+    if (result.ok) {
+      setSetupState('done');
+      setHasOpenRequest(true);
+    } else {
+      setSetupState('error');
+      setBanner({tone: 'error', message: result.message});
+    }
+  }
+
+  // --- Approval-gated screens ---------------------------------------------
+  // A pending or rejected account never sees the dashboard or licence area.
+
+  const signOutButton = (
+    <button
+      type="button"
+      onClick={handleSignOut}
+      className="mt-6 w-full rounded-full border border-slate-300 px-6 py-3 text-sm font-bold text-navy-800 transition-colors hover:border-navy-400 hover:bg-slate-50"
+    >
+      Sign out
+    </button>
+  );
+
+  const verifyReminder = !emailConfirmed && (
+    <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
+      Your email address has not been verified yet. Open the confirmation link we emailed you, or
+      send it again.
+      <button
+        type="button"
+        onClick={handleResend}
+        disabled={resending}
+        className="mt-3 block rounded-full bg-amber-700 px-5 py-2 text-xs font-bold text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+      >
+        {resending ? 'Sending…' : 'Resend confirmation email'}
+      </button>
+    </div>
+  );
+
+  if (view === 'loading') {
+    return (
+      <AccountShell title="My account" subtitle="Your SamTill customer account details.">
+        {banner && <StatusBanner tone={banner.tone}>{banner.message}</StatusBanner>}
+        <p className="text-sm text-navy-700">Checking your account status…</p>
+        {signOutButton}
+      </AccountShell>
+    );
+  }
+
+  if (view === 'waiting') {
+    return (
+      <AccountShell
+        title="My account"
+        subtitle="Your SamTill customer account details."
+        footer={
+          <a href="#/" className="font-semibold text-navy-700 underline-offset-4 hover:underline">
+            Back to the SamTill website
+          </a>
+        }
+      >
+        {banner && <StatusBanner tone={banner.tone}>{banner.message}</StatusBanner>}
+        <dl className="mt-2 space-y-4 text-sm">
+          <div>
+            <dt className="font-bold text-navy-900">Email address</dt>
+            <dd className="mt-0.5 text-navy-700">{sessionUserEmail || 'Not available'}</dd>
+          </div>
+        </dl>
+
+        <div
+          role="status"
+          className="mt-5 rounded-xl border border-sky-300 bg-sky-50 p-5 text-sm leading-relaxed text-sky-900"
+        >
+          <p className="font-bold">Your account is waiting for approval.</p>
+          <p className="mt-1">
+            Thanks for registering. A member of the SamTeck Digital team will review your account
+            shortly. You will receive an email the moment it is approved — this page updates
+            automatically, so you can keep it open.
+          </p>
+        </div>
+
+        {verifyReminder}
+
+        <p className="mt-5 text-xs leading-relaxed text-slate-500">
+          Need help sooner? Contact SamTeck Digital and we will help you get set up.
+        </p>
+
+        {signOutButton}
+      </AccountShell>
+    );
+  }
+
+  if (view === 'rejected') {
+    return (
+      <AccountShell
+        title="My account"
+        subtitle="Your SamTill customer account details."
+        footer={
+          <a href="#contact" className="font-semibold text-amber-700 underline-offset-4 hover:underline">
+            Contact SamTeck Digital
+          </a>
+        }
+      >
+        {banner && <StatusBanner tone={banner.tone}>{banner.message}</StatusBanner>}
+        <div
+          role="status"
+          className="mt-2 rounded-xl border border-red-300 bg-red-50 p-5 text-sm leading-relaxed text-red-900"
+        >
+          <p className="font-bold">Your account was not approved.</p>
+          <p className="mt-1">
+            This registration could not be approved. If you believe this is a mistake, or you would
+            like to discuss a SamTill setup, please contact SamTeck Digital.
+          </p>
+        </div>
+        {signOutButton}
+      </AccountShell>
+    );
+  }
+
+  if (view === 'unknown') {
+    return (
+      <AccountShell title="My account" subtitle="Your SamTill customer account details.">
+        <GateNotice
+          notice="We could not confirm your account status. Please contact SamTeck Digital and we will look into it."
+          actionHref="#contact"
+          actionLabel="Contact us"
+        />
+        {signOutButton}
+      </AccountShell>
+    );
+  }
+
+  // --- Approved: the full dashboard ---------------------------------------
 
   return (
     <AccountShell
@@ -143,7 +327,23 @@ export default function AccountPage() {
             )}
           </dd>
         </div>
+        <div>
+          <dt className="font-bold text-navy-900">Account status</dt>
+          <dd className="mt-0.5">
+            <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-800">
+              Approved
+            </span>
+          </dd>
+        </div>
       </dl>
+
+      {isAdmin && (
+        <p className="mt-4 text-sm">
+          <a href="#/admin" className="font-semibold text-amber-700 underline-offset-4 hover:underline">
+            Open the admin approval dashboard →
+          </a>
+        </p>
+      )}
 
       {!emailConfirmed && (
         <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
@@ -256,6 +456,41 @@ export default function AccountPage() {
           >
             Open the SamTill app →
           </a>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
+        <h2 className="text-sm font-bold text-navy-900">Request setup</h2>
+        {hasOpenRequest || setupState === 'done' ? (
+          <p className="mt-1 text-sm leading-relaxed text-navy-700">
+            Thanks — your setup request has been received. The SamTeck Digital team will be in
+            touch to help you get SamTill running.
+          </p>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-navy-700">
+              Want a hand getting started? Send us a note and we will help you set up SamTill.
+            </p>
+            <label htmlFor="setup-note" className="mt-3 block text-xs font-bold text-navy-800">
+              Anything we should know? (optional)
+            </label>
+            <textarea
+              id="setup-note"
+              rows={3}
+              value={setupNote}
+              onChange={(event) => setSetupNote(event.target.value)}
+              placeholder="e.g. We run a supermarket in Accra and need help adding products."
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 placeholder:text-slate-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            />
+            <button
+              type="button"
+              onClick={() => void handleRequestSetup()}
+              disabled={setupState === 'submitting'}
+              className="mt-3 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+            >
+              {setupState === 'submitting' ? 'Sending…' : 'Request setup help'}
+            </button>
+          </>
         )}
       </div>
 

@@ -13,6 +13,9 @@ export default function Nav() {
   const accountLinks = [
     ...(accountGate.available ? [{label: 'Sign in', href: '#/login'}] : []),
   ];
+  // The Register call to action only shows when the account service can
+  // actually work here — never a dead form.
+  const registerCta = accountGate.available ? {label: 'Register', href: '#/register'} : null;
 
   useEffect(() => {
     const onResize = () => {
@@ -67,7 +70,15 @@ export default function Nav() {
           ))}
         </ul>
 
-        <div className="hidden lg:block">
+        <div className="hidden items-center gap-3 lg:flex">
+          {registerCta && (
+            <a
+              href={registerCta.href}
+              className="inline-flex items-center rounded-full border border-amber-500 px-5 py-2.5 text-sm font-bold text-amber-300 transition-colors hover:bg-amber-500/10 hover:text-amber-200"
+            >
+              {registerCta.label}
+            </a>
+          )}
           <a
             href="#contact"
             className="inline-flex items-center rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
@@ -125,6 +136,17 @@ export default function Nav() {
               Enquire now
             </a>
           </li>
+          {registerCta && (
+            <li className="mt-2">
+              <a
+                href={registerCta.href}
+                onClick={() => setOpen(false)}
+                className="block rounded-full border border-amber-500 px-5 py-3 text-center text-base font-bold text-amber-300 transition-colors hover:bg-amber-500/10"
+              >
+                {registerCta.label}
+              </a>
+            </li>
+          )}
           {accountLinks.map((link) => (
             <li key={link.href} className="mt-1">
               <a

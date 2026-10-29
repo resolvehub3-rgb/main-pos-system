@@ -91,7 +91,10 @@ export default function RegisterPage() {
         return;
       case 'pending_verification':
         setValues(EMPTY);
-        setBanner({tone: 'info', message: result.message});
+        setBanner({
+          tone: 'info',
+          message: `${result.message} After you verify your email and sign in, your account will be reviewed and you will be emailed as soon as it is approved.`,
+        });
         return;
       case 'signed_in':
         setBanner({tone: 'success', message: result.message});
@@ -173,8 +176,9 @@ export default function RegisterPage() {
 
         <p className="mt-4 text-xs leading-relaxed text-slate-500">
           Creating an account does not activate a SamTill POS licence and does not start any
-          payment. Passwords are sent securely to the SamTill account service and are never shown
-          on this website.
+          payment. New accounts are reviewed and approved by SamTeck Digital before they can be
+          used. Passwords are sent securely to the SamTill account service and are never shown on
+          this website.
         </p>
       </form>
     </AccountShell>

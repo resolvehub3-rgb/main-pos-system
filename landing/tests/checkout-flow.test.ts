@@ -565,7 +565,7 @@ test('commercial: licence terms no longer promise that terms are coming', () => 
 
 test('commercial: the payment switch is still off until the backend exists', () => {
   assertEqual(COMMERCE.paymentsEnabled, false, 'paymentsEnabled ships false');
-  assertEqual(COMMERCE.accountEnabled, false, 'accountEnabled ships false');
+  assertEqual(COMMERCE.accountEnabled, true, 'accountEnabled ships true (approval-gated)');
 });
 
 test('sql: no invalid privileges are granted or revoked on a sequence', () => {
