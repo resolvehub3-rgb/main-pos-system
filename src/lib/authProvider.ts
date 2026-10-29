@@ -33,7 +33,7 @@ export const REMOTE_USER_COLUMNS =
   'id,tenant_id,shop_name,full_name,email,phone,role,is_active,created_at';
 
 /** The `profiles` columns the resolver needs. Role is the authoritative field. */
-const PROFILE_COLUMNS = 'id,role,full_name,email,phone';
+const PROFILE_COLUMNS = 'id,role,full_name,email,phone,created_at';
 
 /** Result of resolving the Supabase Auth identity into an application user. */
 export type AuthResolveResult =
@@ -136,6 +136,31 @@ export type ProvisionResult =
   | { ok: false; message: string; needsEmailConfirmation?: boolean };
 
 /**
+ * Turn a provisioning RPC error into the message shown to the owner.
+ *
+ * PostgREST answers PGRST202 ("could not find the function … in the schema
+ * cache") when the function exists in the repo but its migration was never
+ * applied to the project — the exact failure that kept shop registration
+ * broken while every code path was correct. The raw text names internal
+ * signatures and helps no one; this spells out the actual fix instead.
+ * Everything else passes through, prefixed the same way as before.
+ */
+export function formatProvisionError(
+  prefix: string,
+  error: { message: string; code?: string }
+): string {
+  if (error.code === 'PGRST202' || /could not find the function/i.test(error.message)) {
+    return (
+      `${prefix}: the database is missing the shop-provisioning setup. ` +
+      'Ask your administrator to apply the pending migrations in supabase/migrations ' +
+      '(in filename order, in the Supabase SQL Editor) — starting with ' +
+      '20261030000001_provisioning_rpc.sql — then try again.'
+    );
+  }
+  return `${prefix}: ${error.message}`;
+}
+
+/**
  * Create a new shop owner + shop entirely through trusted server-side calls.
  *
  * The client NEVER inserts a tenant, profile or membership row directly. It:
@@ -200,7 +225,7 @@ export async function signUpAndProvisionShop(
     p_owner_phone: params.phone,
   });
   if (rpcError) {
-    return { ok: false, message: `Could not create your shop: ${rpcError.message}` };
+    return { ok: false, message: formatProvisionError('Could not create your shop', rpcError) };
   }
   if (!tenantId) {
     return { ok: false, message: 'Could not create your shop: no shop id was returned.' };
@@ -228,7 +253,7 @@ export async function ensureOwnerShop(
     p_owner_name: params.fullName,
     p_owner_phone: params.phone,
   });
-  if (error) return { ok: false, message: `Could not set up your shop: ${error.message}` };
+  if (error) return { ok: false, message: formatProvisionError('Could not set up your shop', error) };
   if (!tenantId) return { ok: false, message: 'Could not set up your shop: no shop id was returned.' };
   return { ok: true, tenantId: String(tenantId) };
 }
@@ -275,6 +300,28 @@ export async function resolveAuthUser(
     };
   }
 
+  // A super admin is a PLATFORM account: they own no shop, so there is no
+  // membership (step 2) and no per-shop roster row (step 3) to find — and the
+  // requirements below would lock every super admin out. Their authority is
+  // the `profiles.role` row just read, which the database itself protects: the
+  // `block_super_admin_escalation` trigger (migration 20261029000001) refuses
+  // `role='super_admin'` from any authenticated caller who is not already one,
+  // so this value is written only by the trusted service role / SQL Editor.
+  // Reaching it here therefore means the database has already vouched for the
+  // role — no shop is required to prove it.
+  if (profile.role === 'super_admin') {
+    const superAdmin: UserAccount = {
+      id: authUid,
+      full_name: (profile.full_name as string) ?? email,
+      email: (profile.email as string) ?? email,
+      role: 'super_admin',
+      phone: (profile.phone as string) ?? '',
+      is_active: true,
+      created_at: (profile.created_at as string) ?? new Date().toISOString(),
+    };
+    return { ok: true, user: superAdmin };
+  }
+
   // 2. An ACTIVE tenant membership is required — a signed-in identity with no
   //    shop has nowhere to open and must not reach protected data.
   const membershipRes = await client
@@ -297,6 +344,19 @@ export async function resolveAuthUser(
 
   // 3. The app roster row, matched by the Auth-verified email. RLS scopes this
   //    read to the caller's own tenant, so a foreign roster row is not visible.
+  //
+  //    OPTIONAL for an account the trusted RPC just provisioned. The
+  //    create_tenant_with_owner RPC writes a profile + an active membership
+  //    but deliberately NOT a public.users roster row (that table is the
+  //    app-managed staff list, written when an owner invites staff — not part
+  //    of trusted shop signup). Requiring it here would lock out every
+  //    newly-registered owner with "no staff record". So: if a roster row
+  //    exists we use it as before; if it does not, we still have everything
+  //    needed to sign the user in safely —
+  //      • profile.role   → the authoritative, escalation-trigger-protected role;
+  //      • membership     → proof of an ACTIVE shop (already filtered below),
+  //                         which is also how deactivation is enforced.
+  //    We build the user from those instead of refusing.
   const rosterRes = await client
     .from('users')
     .select(REMOTE_USER_COLUMNS)
@@ -306,27 +366,48 @@ export async function resolveAuthUser(
     return { ok: false, code: 'no_roster', message: 'Could not load your staff record.' };
   }
   const roster = (rosterRes.data as Array<Record<string, unknown>> | null)?.[0];
-  if (!roster) {
-    return {
-      ok: false,
-      code: 'no_roster',
-      message: 'No staff record exists for this account yet. Ask your shop owner to invite you.',
+
+  if (roster) {
+    if (roster.is_active === false) {
+      return {
+        ok: false,
+        code: 'inactive',
+        message: 'This account has been deactivated. Please contact your administrator.',
+      };
+    }
+    const user: UserAccount = {
+      ...(roster as unknown as UserAccount),
+      // The profile role wins over the roster role: it is the field the RLS
+      // helpers and the DB escalation trigger both trust. This keeps the app's
+      // displayed role identical to the role the database enforces.
+      role: (profile.role as UserRole) ?? (roster.role as UserRole),
     };
-  }
-  if (roster.is_active === false) {
-    return {
-      ok: false,
-      code: 'inactive',
-      message: 'This account has been deactivated. Please contact your administrator.',
-    };
+    return { ok: true, user };
   }
 
+  // No roster row. The membership already proved an active shop, so this is a
+  // trusted-provisioned account (e.g. a shop owner who just registered). Build
+  // the user from the profile + membership. We fetch the shop's name so the
+  // header and dashboard show the real shop, not a placeholder.
+  const tenantId = String(membership.tenant_id);
+  let shopName: string | undefined;
+  const tenantRes = await client.from('tenants').select('name').eq('id', tenantId).limit(1);
+  if (!tenantRes.error) {
+    const tenant = (tenantRes.data as Array<Record<string, unknown>> | null)?.[0];
+    shopName = typeof tenant?.name === 'string' ? tenant.name : undefined;
+  }
   const user: UserAccount = {
-    ...(roster as unknown as UserAccount),
-    // The profile role wins over the roster role: it is the field the RLS
-    // helpers and the DB escalation trigger both trust. This keeps the app's
-    // displayed role identical to the role the database enforces.
-    role: (profile.role as UserRole) ?? (roster.role as UserRole),
+    id: authUid,
+    tenant_id: tenantId,
+    shop_name: shopName,
+    full_name: (profile.full_name as string) ?? email,
+    email: (profile.email as string) ?? email,
+    role: (profile.role as UserRole) ?? 'cashier',
+    phone: (profile.phone as string) ?? '',
+    // An active membership is the live gate (step 2 filters is_active), so a
+    // provisioned account with no roster row is active by construction.
+    is_active: true,
+    created_at: (profile.created_at as string) ?? new Date().toISOString(),
   };
   return { ok: true, user };
 }

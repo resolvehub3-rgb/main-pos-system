@@ -4,6 +4,7 @@ import {
   REMOTE_USER_COLUMNS,
   classifySignInError,
   ensureOwnerShop,
+  formatProvisionError,
   resolveAuthUser,
   signInWithSupabase,
   signOutSupabase,
@@ -245,12 +246,72 @@ test('resolveAuthUser refuses a signed-in identity with no active membership', a
   assert.equal((res as any).code, 'no_membership');
 });
 
-test('resolveAuthUser refuses an account with no roster record', async () => {
+test('a super admin signs in with no shop, membership or roster row', async () => {
+  // A super admin is a PLATFORM account: they own no shop, so the membership
+  // and roster steps that every other role must pass would lock them out. The
+  // DB-protected profiles.role alone is enough — the escalation trigger already
+  // guarantees it could not have been written by a non-super-admin.
+  const { client, calls } = makeStub({
+    rows: (state) => {
+      if (state.table === 'profiles') {
+        return {
+          data: [{ id: uid, role: 'super_admin', full_name: 'Sam Pos', email: 'sampos@gmail.com', phone: '', created_at: '2026-10-20T09:15:00.000Z' }],
+          error: null,
+        };
+      }
+      return { data: [], error: null }; // no membership, no roster — as expected
+    },
+  });
+  const res = await resolveAuthUser(client, { id: uid, email: 'sampos@gmail.com' });
+  assert.equal(res.ok, true);
+  const user = (res as any).user;
+  assert.equal(user.role, 'super_admin');
+  assert.equal(user.id, uid);
+  // No tenant: the platform dashboard pulls every shop, not one.
+  assert.equal(user.tenant_id, undefined);
+  // The membership/roster reads are skipped entirely for a super admin.
+  const tablesRead = calls.selects.map((s) => s.table);
+  assert.ok(!tablesRead.includes('tenant_memberships'), 'must not require a membership');
+  assert.ok(!tablesRead.includes('users'), 'must not require a roster row');
+});
+
+test('resolveAuthUser signs in a provisioned owner with profile + membership but NO roster row', async () => {
+  // The create_tenant_with_owner RPC writes a profile + an active membership
+  // but deliberately NOT a public.users roster row (that table is the
+  // app-managed staff list, written when an owner invites staff). Requiring a
+  // roster row locked every freshly-registered owner out with "no staff
+  // record". The profile + active membership are sufficient: profile.role is
+  // escalation-trigger-protected, and the membership (already filtered to
+  // is_active) is the live proof of an active shop.
+  const { client } = makeStub({
+    rows: (state) => {
+      if (state.table === 'profiles') {
+        return { data: [{ id: uid, role: 'shop_owner', full_name: 'Zen Owner', email: 'a@b.com', phone: '024', created_at: '2026-10-29T10:00:00.000Z' }], error: null };
+      }
+      if (state.table === 'tenant_memberships') return { data: [{ tenant_id: 't1' }], error: null };
+      if (state.table === 'tenants') return { data: [{ name: 'Zen Mart Shop' }], error: null };
+      return { data: [], error: null }; // users roster empty
+    },
+  });
+  const res = await resolveAuthUser(client, { id: uid, email: 'a@b.com' });
+  assert.equal(res.ok, true, 'profile + active membership must be enough to sign in');
+  const user = (res as any).user;
+  assert.equal(user.id, uid);
+  assert.equal(user.tenant_id, 't1');
+  assert.equal(user.shop_name, 'Zen Mart Shop', 'shop name comes from the tenants row');
+  assert.equal(user.role, 'shop_owner', 'role comes from the DB-protected profile');
+  assert.equal(user.is_active, true);
+});
+
+test('resolveAuthUser still fails with no_roster when the roster READ itself errors', async () => {
+  // The roster row is optional, but the query must not silently swallow a
+  // real read failure (network/permission) as "no roster row".
   const { client } = makeStub({
     rows: (state) => {
       if (state.table === 'profiles') return { data: [{ id: uid, role: 'cashier', full_name: 'X', email: 'a@b.com', phone: '' }], error: null };
       if (state.table === 'tenant_memberships') return { data: [{ tenant_id: 't1' }], error: null };
-      return { data: [], error: null }; // users roster empty
+      if (state.table === 'users') return { data: null, error: { message: 'permission denied' } };
+      return { data: [], error: null };
     },
   });
   const res = await resolveAuthUser(client, { id: uid, email: 'a@b.com' });
@@ -341,6 +402,43 @@ test('signUpAndProvisionShop surfaces a provisioning failure', async () => {
   });
   assert.equal(res.ok, false);
   assert.match((res as any).message, /could not create your shop/i);
+});
+
+test('a missing provisioning migration is reported as the fix, not PostgREST jargon', async () => {
+  // The real production failure: the RPC's migration was never applied to the
+  // project, and PostgREST answered PGRST202 with internal signature text.
+  // The owner must be told to apply the migrations — not shown schema cache
+  // internals they cannot act on.
+  const { client } = makeStub({
+    signUp: () => ({ data: { user: { id: uid, email: 'a@b.com' }, session: {} }, error: null }),
+    rpc: () => ({
+      data: null,
+      error: {
+        code: 'PGRST202',
+        message:
+          'Could not find the function public.create_tenant_with_owner(p_owner_name, p_owner_phone, p_shop_address, p_shop_name) in the schema cache',
+      },
+    }),
+  });
+  const res = await signUpAndProvisionShop(client, {
+    email: 'a@b.com',
+    password: 'pw',
+    shopName: 'Antwi Mart',
+    fullName: 'Kojo',
+    phone: '024',
+  });
+  assert.equal(res.ok, false);
+  const message = (res as any).message as string;
+  assert.match(message, /pending migrations/i);
+  assert.match(message, /20261030000001_provisioning_rpc\.sql/);
+  assert.ok(!message.includes('schema cache'), 'the raw PostgREST text must not leak through');
+
+  // The post-confirmation path gives the same guidance.
+  const again = formatProvisionError('Could not set up your shop', {
+    code: 'PGRST202',
+    message: 'Could not find the function public.create_tenant_with_owner without parameters',
+  });
+  assert.match(again, /pending migrations/i);
 });
 
 test('signUpAndProvisionShop classifies a duplicate-email sign-up', async () => {

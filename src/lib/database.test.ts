@@ -122,6 +122,65 @@ test('deleteUser removes a cashier but refuses to strand the shop', () => {
   }
 });
 
+test('toggleUserStatus lets an owner toggle staff but never the super admin', () => {
+  const beforeAdminSession = db.getCurrentUser();
+  db.setCurrentUser({
+    id: 'test-super-admin-toggle',
+    full_name: 'Provisioned Admin',
+    email: 'root-toggle-provision@example.com',
+    phone: '',
+    role: 'super_admin',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  });
+  const root = db.addUser({
+    full_name: 'Platform Admin',
+    email: 'root-toggle@example.com',
+    phone: '+233 20 555 6666',
+    role: 'super_admin',
+    password: 'secret3',
+    is_active: true,
+  });
+  db.setCurrentUser(beforeAdminSession);
+
+  const owner = db.addUser({
+    tenant_id: 'tenant-toggle-1',
+    shop_name: 'Toggle Test Mart',
+    full_name: 'Owning Manager',
+    email: 'owner-toggle@example.com',
+    phone: '+233 20 111 2222',
+    role: 'shop_owner',
+    password: 'secret1',
+    is_active: true,
+  });
+  const cashier = db.addUser({
+    tenant_id: 'tenant-toggle-1',
+    shop_name: 'Toggle Test Mart',
+    full_name: 'Till Operator',
+    email: 'cashier-toggle@example.com',
+    phone: '+233 20 333 4444',
+    role: 'cashier',
+    password: 'secret2',
+    is_active: true,
+  });
+
+  const signedInAs = db.getCurrentUser();
+  db.setCurrentUser(owner);
+  try {
+    // A shop owner may toggle their own cashier.
+    assert.equal(db.toggleUserStatus(cashier.id), true, 'owner can suspend their cashier');
+    assert.equal(db.getUsers().find((u) => u.id === cashier.id)?.is_active, false, 'cashier is now suspended');
+    assert.equal(db.toggleUserStatus(cashier.id), true, 'and re-enable them');
+
+    // A shop owner must NOT be able to deactivate the platform super admin —
+    // that would lock every shop out of its administrator.
+    assert.equal(db.toggleUserStatus(root.id), false, 'a super admin is untouchable here');
+    assert.equal(db.getUsers().find((u) => u.id === root.id)?.is_active, true, 'super admin stays active');
+  } finally {
+    db.setCurrentUser(signedInAs);
+  }
+});
+
 test('a shift opens, absorbs cash sales and drawer movements, then closes', () => {
   const tenant = 'tenant-shift-1';
 

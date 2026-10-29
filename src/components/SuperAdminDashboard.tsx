@@ -141,6 +141,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const totalShopsCount = tenants.length;
   const activeShopsCount = tenants.filter((t) => t.is_active).length;
   const activeSubscriptionsCount = tenants.filter((t) => t.subscription_status === 'active').length;
+  const trialSubscriptionsCount = tenants.filter((t) => t.subscription_status === 'trial').length;
+  const activeUsersCount = users.filter((u) => u.is_active).length;
 
   // Real "vs. last 7 days" comparison, using the same calendar-day boundaries as the chart
   // (null when the previous window has no sales to compare against)
@@ -248,14 +250,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const topProductsList = Array.from(productSalesMap.values())
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 5);
-
-  const fallbackTopProducts = [
-    { name: 'Indomie Noodles', amount: 8420, img: 'https://images.unsplash.com/photo-1612927601601-6638404737ce?w=100&auto=format&fit=crop&q=80' },
-    { name: 'Eva Water 500ml', amount: 6230, img: 'https://images.unsplash.com/photo-1559839914-17aae19cec71?w=100&auto=format&fit=crop&q=80' },
-    { name: 'Milo 400g', amount: 5880, img: 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=100&auto=format&fit=crop&q=80' },
-    { name: 'Tomato Mix', amount: 4320, img: 'https://images.unsplash.com/photo-1598514982205-f36b96d1e8d4?w=100&auto=format&fit=crop&q=80' },
-    { name: 'Golden Margarine', amount: 3210, img: 'https://images.unsplash.com/photo-1589985270826-4b7bb135bc9d?w=100&auto=format&fit=crop&q=80' },
-  ];
 
   // Handlers for shop creation
   const handleCreateShop = (e: React.FormEvent) => {
@@ -484,12 +478,22 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 <div>
                   <p className="text-xs font-semibold text-slate-500">Total Shops</p>
                   <h3 className="text-2xl font-black text-slate-900 mt-1 tracking-tight">
-                    {totalShopsCount || 12}
+                    {totalShopsCount}
                   </h3>
-                  <p className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1 mt-1">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>↑ 20%</span>
-                    <span className="text-slate-400 font-normal">Active shops</span>
+                  <p className="text-[11px] font-semibold flex items-center gap-1 mt-1">
+                    {totalShopsCount === 0 ? (
+                      <span className="text-slate-400 font-normal">No shops registered yet</span>
+                    ) : (
+                      <>
+                        <Store className="w-3.5 h-3.5 text-emerald-500" />
+                        <span className="text-emerald-600">{activeShopsCount} active</span>
+                        <span className="text-slate-400 font-normal">
+                          {activeShopsCount < totalShopsCount
+                            ? `· ${totalShopsCount - activeShopsCount} inactive`
+                            : '· all operational'}
+                        </span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="w-12 h-12 rounded-2xl bg-orange-500/10 text-[#F28C28] flex items-center justify-center flex-shrink-0">
@@ -501,12 +505,22 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 <div>
                   <p className="text-xs font-semibold text-slate-500">Total Users</p>
                   <h3 className="text-2xl font-black text-slate-900 mt-1 tracking-tight">
-                    {users.length || 48}
+                    {users.length}
                   </h3>
-                  <p className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1 mt-1">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>↑ 15%</span>
-                    <span className="text-slate-400 font-normal">Across all shops</span>
+                  <p className="text-[11px] font-semibold flex items-center gap-1 mt-1">
+                    {users.length === 0 ? (
+                      <span className="text-slate-400 font-normal">No staff accounts yet</span>
+                    ) : (
+                      <>
+                        <Users className="w-3.5 h-3.5 text-emerald-500" />
+                        <span className="text-emerald-600">{activeUsersCount} active</span>
+                        <span className="text-slate-400 font-normal">
+                          {activeUsersCount < users.length
+                            ? `· ${users.length - activeUsersCount} deactivated`
+                            : '· across all shops'}
+                        </span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="w-12 h-12 rounded-2xl bg-orange-500/10 text-[#F28C28] flex items-center justify-center flex-shrink-0">
@@ -518,12 +532,26 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 <div>
                   <p className="text-xs font-semibold text-slate-500">Active Subscriptions</p>
                   <h3 className="text-2xl font-black text-slate-900 mt-1 tracking-tight">
-                    {activeSubscriptionsCount || 10}
+                    {activeSubscriptionsCount}
                   </h3>
-                  <p className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1 mt-1">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>↑ 11%</span>
-                    <span className="text-slate-400 font-normal">Monthly & Yearly plans</span>
+                  <p className="text-[11px] font-semibold flex items-center gap-1 mt-1">
+                    {activeSubscriptionsCount === 0 ? (
+                      <span className="text-slate-400 font-normal">
+                        {trialSubscriptionsCount > 0
+                          ? `${trialSubscriptionsCount} on free trial`
+                          : 'No active subscriptions'}
+                      </span>
+                    ) : (
+                      <>
+                        <CreditCard className="w-3.5 h-3.5 text-emerald-500" />
+                        <span className="text-emerald-600">{activeSubscriptionsCount} paying</span>
+                        <span className="text-slate-400 font-normal">
+                          {trialSubscriptionsCount > 0
+                            ? `· ${trialSubscriptionsCount} on trial`
+                            : '· Monthly & Yearly plans'}
+                        </span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="w-12 h-12 rounded-2xl bg-orange-500/10 text-[#F28C28] flex items-center justify-center flex-shrink-0">
@@ -687,36 +715,41 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   className={`collapsible ${openPanels.topProducts ? '' : 'collapsed'}`}
                 >
                   <div>
-                  <div className="space-y-3.5">
-                  {(topProductsList.length > 0
-                    ? topProductsList.map((item) => ({
-                        name: item.product.name,
-                        amount: item.amount,
-                        img: item.product.image_url,
-                      }))
-                    : fallbackTopProducts
-                  ).map((prod, idx) => (
-                    <div key={prod.name} className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <span className="w-5 h-5 rounded-full bg-orange-100 text-[#F28C28] font-bold text-xs flex items-center justify-center flex-shrink-0">
-                          {idx + 1}
-                        </span>
-                        <img
-                          src={prod.img || 'https://images.unsplash.com/photo-1612927601601-6638404737ce?w=80'}
-                          alt={prod.name}
-                          className="w-9 h-9 rounded-lg object-cover border border-slate-100"
-                        />
-                        <div>
-                          <h4 className="text-xs font-bold text-slate-900 line-clamp-1">{prod.name}</h4>
-                          <p className="text-[11px] text-slate-400">Retail item</p>
+                  {topProductsList.length > 0 ? (
+                    <div className="space-y-3.5">
+                      {topProductsList.map((item, idx) => (
+                        <div key={item.product.id} className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <span className="w-5 h-5 rounded-full bg-orange-100 text-[#F28C28] font-bold text-xs flex items-center justify-center flex-shrink-0">
+                              {idx + 1}
+                            </span>
+                            {item.product.image_url ? (
+                              <img
+                                src={item.product.image_url}
+                                alt={item.product.name}
+                                className="w-9 h-9 rounded-lg object-cover border border-slate-100"
+                              />
+                            ) : (
+                              <div className="w-9 h-9 rounded-lg border border-slate-100 bg-slate-50 flex items-center justify-center">
+                                <Package className="w-4 h-4 text-slate-400" aria-hidden="true" />
+                              </div>
+                            )}
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900 line-clamp-1">{item.product.name}</h4>
+                              <p className="text-[11px] text-slate-400">Retail item</p>
+                            </div>
+                          </div>
+                          <span className="text-xs font-extrabold text-slate-800">
+                            {formatGHS(item.amount)}
+                          </span>
                         </div>
-                      </div>
-                      <span className="text-xs font-extrabold text-slate-800">
-                        {formatGHS(prod.amount)}
-                      </span>
+                      ))}
                     </div>
-                  ))}
-                  </div>
+                  ) : (
+                    <p className="py-4 text-center text-xs text-slate-500">
+                      No product sales recorded yet.
+                    </p>
+                  )}
                   </div>
                 </div>
               </div>
@@ -1068,10 +1101,22 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                     {tenants.map((t) => (
                       <tr key={t.id} className="hover:bg-slate-50/70">
                         <td className="py-3 font-bold text-slate-900">{t.name}</td>
-                        <td className="py-3 text-slate-700 font-semibold">Supermarket Pro</td>
-                        <td className="py-3 text-slate-500">GH₵ 350.00 / month</td>
+                        <td className="py-3 text-slate-700 font-semibold capitalize">
+                          {t.subscription_status === 'trial' ? 'Trial' : t.subscription_status === 'active' ? 'Paid' : '—'}
+                        </td>
+                        <td className="py-3 text-slate-500">
+                          {(t.currency || 'GHS') + ' · ' + (t.subscription_status === 'active' ? 'active' : 'not paying')}
+                        </td>
                         <td className="py-3">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 capitalize">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${
+                              t.subscription_status === 'active'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : t.subscription_status === 'trial'
+                                  ? 'bg-sky-100 text-sky-700'
+                                  : 'bg-amber-100 text-amber-700'
+                            }`}
+                          >
                             {t.subscription_status}
                           </span>
                         </td>

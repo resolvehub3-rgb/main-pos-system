@@ -207,7 +207,13 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   const tenantProducts = products.filter((p) => p.tenant_id === currentTenant.id && p.is_active);
   const customers = db.getCustomers(currentTenant.id);
   const expenses = db.getExpenses(currentTenant.id);
-  const staffMembers = db.getUsers(currentTenant.id);
+  // The shop owner manages their own shop's staff. A super admin is platform
+  // infrastructure, not store staff, so it is excluded here — a super-admin
+  // row can otherwise surface through the shared local store (this is a
+  // local-first app) and would show the platform administrator's name and a
+  // Deactivate control to someone with no business seeing either. The service
+  // also refuses the toggle/delete, so this is display-only defence in depth.
+  const staffMembers = db.getUsers(currentTenant.id).filter((u) => u.role !== 'super_admin');
   const movements = db.getInventoryMovements(currentTenant.id);
   const shopCategories = db.getCategories(currentTenant.id);
 

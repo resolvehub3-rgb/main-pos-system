@@ -11,6 +11,7 @@ import { SupabaseConfigModal } from './components/SupabaseConfigModal';
 import { AuthPage } from './components/AuthPage';
 import { OfflineBanner } from './components/OfflineBanner';
 import { db } from './lib/supabaseClient';
+import { syncAuthUrl } from './lib/roleRoute';
 import { UserAccount, CartItem, Sale, Product, Tenant } from './types';
 import { calculateCartTotals } from './lib/money';
 import { buildCustomerDisplayState, cartToCustomerItems } from './lib/customerDisplay';
@@ -57,6 +58,14 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
       }
     });
     return () => unsubscribe();
+  }, [currentUser]);
+
+  // The address bar must show the signed-in role's own URL, never the auth
+  // page the operator happened to arrive on. Sign-in, session restore, a
+  // role change pushed over realtime and logout all pass through this state,
+  // so one effect covers every transition (see src/lib/roleRoute.ts).
+  useEffect(() => {
+    syncAuthUrl(currentUser);
   }, [currentUser]);
 
   // Retrieve current database records

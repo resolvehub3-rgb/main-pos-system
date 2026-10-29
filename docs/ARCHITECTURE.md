@@ -12,7 +12,7 @@ SamTill POS is a production-ready, multi-tenant supermarket and retail POS SaaS 
    - Offline IndexedDB caching with synchronization queue
 2. **Database & Storage**: Supabase (PostgreSQL 15+)
    - Row Level Security (RLS) on all tenant-partitioned tables
-   - Supabase Realtime publications on `sales`, `products`, `inventory_movements`, `cash_register_shifts`
+   - Supabase Realtime publications on `sales`, `products`, `inventory_movements`, `cash_register_shifts`, `product_categories`, `users`, `tenants`
    - Supabase Storage buckets for product images and shop receipts
 3. **Backend & API**: Node.js + Express + TypeScript
    - Modular REST API under `/api/v1`

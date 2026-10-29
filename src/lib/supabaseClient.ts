@@ -43,10 +43,20 @@ import {
   syncMovement,
   syncAudit,
   setTenantLookup,
+  toUuid,
   fromUuid,
   bindMirrorId,
 } from './sync.ts';
-import { adoptCategory, adoptCustomer, adoptProduct, adoptSale } from './mirrorRows.ts';
+import {
+  adoptBranch,
+  adoptCategory,
+  adoptCustomer,
+  adoptProduct,
+  adoptSale,
+  adoptTenant,
+  adoptUser,
+} from './mirrorRows.ts';
+import { applyRealtimeRow } from './realtimeRows.ts';
 import {
   signInWithSupabase,
   signOutSupabase,
@@ -95,6 +105,16 @@ const STORAGE_KEY_SESSION = 'samtech_auth_session';
  */
 const SIGNIN_SALES_LIMIT = 500;
 
+/**
+ * How much sales history a super-admin session adopts at once.
+ *
+ * A super admin has no tenant to scope a sign-in pull to, and the dashboard
+ * aggregates every shop, so the pull is platform-wide. Sales are the one
+ * unbounded table, so it is capped at the most recent rows — the session then
+ * stays current through realtime inserts instead of re-reading history.
+ */
+const PLATFORM_SALES_LIMIT = 2000;
+
 export interface SupabaseConfig {
   url: string;
   anonKey: string;
@@ -122,6 +142,8 @@ class DatabaseService {
   private listeners: Array<() => void> = [];
   private supabaseClient: SupabaseClient | null = null;
   private realtimeChannel: any = null;
+  /** In-flight platform adoption, so concurrent triggers join instead of racing. */
+  private platformAdopt: Promise<void> | null = null;
   private config: SupabaseConfig = {
     url: ENV_SUPABASE_URL,
     anonKey: ENV_SUPABASE_ANON_KEY,
@@ -408,6 +430,15 @@ class DatabaseService {
         // a token refresh does not clobber an active in-memory session.
         if (!this.currentUser && session?.user) {
           void this.restoreUserFromSession(session.user);
+        } else if (session?.user && this.currentUser?.role === 'super_admin') {
+          // The reload path: the session came back from localStorage along
+          // with the user, so the restore above never runs — and without this
+          // the super-admin dashboard would be frozen on whatever its mirror
+          // held the last time the tab was open, with rows created in the
+          // meantime unreachable until sign-out. Re-adopt (idempotent: only
+          // missing rows are added) on every session event, and notify when
+          // done so the dashboard re-renders.
+          void this.adoptRemotePlatform();
         }
         break;
       }
@@ -452,12 +483,7 @@ class DatabaseService {
         return;
       }
       const user = result.user;
-      bindMirrorId(user.id);
-      if (user.tenant_id) {
-        bindMirrorId(user.tenant_id);
-        await this.adoptRemoteShop(user.tenant_id);
-        await this.adoptRemoteCatalogue(user.tenant_id);
-      }
+      await this.adoptRemoteFor(user);
       const existing = this.users.find((u) => u.id === user.id);
       if (existing) {
         Object.assign(existing, user);
@@ -525,10 +551,13 @@ class DatabaseService {
    *
    * Realtime broadcasts whatever row was written — and since this layer maps
    * app ids to UUIDs, an echo of a row this tab just saved arrives keyed by a
-   * UUID no local entity uses. Handing `payload.new` straight to the array
-   * would therefore append a second copy of every product, sale and tenant
-   * under a foreign id. Unresolvable payloads are dropped: the app is
-   * local-first and is already the source of truth for the row it wrote.
+   * UUID no local entity uses by itself. The mapping recognises rows this
+   * session wrote (registered by {@link toUuid}) or adopted earlier
+   * (registered by {@link bindMirrorId}).
+   *
+   * `null` therefore means one of two things: a payload with no usable id, or
+   * a row created in ANOTHER session that the mirror has never seen. The
+   * handlers treat those differently — see {@link mergeRealtimeRow}.
    */
   private resolveEchoId(payload: { new?: { id?: string }; old?: { id?: string } }): string | null {
     const raw = payload.new?.id ?? payload.old?.id;
@@ -536,36 +565,57 @@ class DatabaseService {
     return fromUuid(raw) ?? null;
   }
 
-  private handleRealtimeProduct(payload: any) {
-    const id = this.resolveEchoId(payload);
-    if (!id) return;
-    if (payload.eventType === 'UPDATE' && payload.new) {
-      const idx = this.products.findIndex((p) => p.id === id);
-      if (idx !== -1) {
-        this.products[idx] = { ...this.products[idx], ...payload.new, id };
-        this.notify();
-      }
-    } else if (payload.eventType === 'DELETE') {
-      const before = this.products.length;
-      this.products = this.products.filter((p) => p.id !== id);
-      if (this.products.length !== before) this.notify();
+  /**
+   * Fold one realtime payload into the mirror, whichever session produced it.
+   *
+   * Pure decision-making lives in {@link applyRealtimeRow} (its doc explains
+   * why a payload from ANOTHER session used to be dropped — that is what left
+   * the super-admin dashboard on stale data); this wrapper only persists and
+   * notifies when the fold changed something.
+   */
+  private mergeRealtimeRow<T extends { id: string }>(
+    store: T[],
+    eventType: string,
+    resolvedId: string | null,
+    raw: Record<string, unknown> | undefined,
+    wrap: (row: Record<string, unknown>) => T,
+  ): void {
+    if (applyRealtimeRow(store, eventType, resolvedId, raw, wrap)) {
+      this.notify();
     }
+  }
+
+  private handleRealtimeProduct(payload: any) {
+    this.mergeRealtimeRow(
+      this.products,
+      payload.eventType,
+      this.resolveEchoId(payload),
+      payload.new,
+      adoptProduct,
+    );
   }
 
   private handleRealtimeSale(payload: any) {
-    // Sales are append-only in the UI; an echo of a sale this tab created is
-    // already present, so there is nothing to apply.
-    this.resolveEchoId(payload);
+    // Append-only in the UI: an echo of a sale this tab created resolves to a
+    // held row and is skipped; a sale from another till is adopted, which is
+    // what keeps the super-admin ledger live.
+    this.mergeRealtimeRow(
+      this.sales,
+      payload.eventType,
+      this.resolveEchoId(payload),
+      payload.new,
+      adoptSale,
+    );
   }
 
   private handleRealtimeTenant(payload: any) {
-    const id = this.resolveEchoId(payload);
-    if (!id || payload.eventType !== 'UPDATE' || !payload.new) return;
-    const idx = this.tenants.findIndex((t) => t.id === id);
-    if (idx !== -1) {
-      this.tenants[idx] = { ...this.tenants[idx], ...payload.new, id };
-      this.notify();
-    }
+    this.mergeRealtimeRow(
+      this.tenants,
+      payload.eventType,
+      this.resolveEchoId(payload),
+      payload.new,
+      adoptTenant,
+    );
   }
 
   private handleRealtimeMovement(payload: any) {
@@ -575,47 +625,32 @@ class DatabaseService {
   }
 
   private handleRealtimeCategory(payload: any) {
-    const id = this.resolveEchoId(payload);
-    if (!id) return;
-    if (payload.eventType === 'UPDATE' && payload.new) {
-      const idx = this.categories.findIndex((c) => c.id === id);
-      if (idx !== -1) {
-        this.categories[idx] = { ...this.categories[idx], ...payload.new, id };
-        this.notify();
-      }
-    } else if (payload.eventType === 'DELETE') {
-      const before = this.categories.length;
-      this.categories = this.categories.filter((c) => c.id !== id);
-      if (this.categories.length !== before) this.notify();
-    }
+    this.mergeRealtimeRow(
+      this.categories,
+      payload.eventType,
+      this.resolveEchoId(payload),
+      payload.new,
+      adoptCategory,
+    );
   }
 
   /**
    * Staff roster changes made in another session.
    *
    * This is what makes deleting a cashier from one till drop it on every other
-   * open session without a reload. A DELETE arrives keyed by the UUID, which
-   * {@link resolveEchoId} maps back to the app id — so only rows this session
-   * actually holds (and therefore backfilled) are affected, and an echo of a
-   * row this tab just removed is a harmless no-op.
-   *
-   * UPDATE is handled too, so toggling an account active/inactive propagates
-   * alongside deletion and the roster cannot drift between sessions.
+   * open session without a reload, and what adds a roster row created from
+   * the super-admin dashboard to a session that never saw it. UPDATE is
+   * handled too, so toggling an account active/inactive propagates alongside
+   * deletion and the roster cannot drift between sessions.
    */
   private handleRealtimeUser(payload: any) {
-    const id = this.resolveEchoId(payload);
-    if (!id) return;
-    if (payload.eventType === 'DELETE') {
-      const before = this.users.length;
-      this.users = this.users.filter((u) => u.id !== id);
-      if (this.users.length !== before) this.notify();
-    } else if (payload.eventType === 'UPDATE' && payload.new) {
-      const idx = this.users.findIndex((u) => u.id === id);
-      if (idx !== -1) {
-        this.users[idx] = { ...this.users[idx], ...payload.new, id };
-        this.notify();
-      }
-    }
+    this.mergeRealtimeRow(
+      this.users,
+      payload.eventType,
+      this.resolveEchoId(payload),
+      payload.new,
+      adoptUser,
+    );
   }
 
   // --- Product Categories (shop-admin managed) ---
@@ -1671,6 +1706,17 @@ class DatabaseService {
   public toggleUserStatus(userId: string): boolean {
     const u = this.users.find((user) => user.id === userId);
     if (!u) return false;
+
+    // A super admin is platform infrastructure, not shop staff. Only another
+    // super admin may deactivate one — otherwise a shop owner (whose session
+    // can still hold a super-admin row via the shared local store) could flip
+    // the platform administrator off and lock everyone out. This mirrors the
+    // refusal deleteUser already makes, so both staff actions agree.
+    if (u.role === 'super_admin' && this.currentUser?.role !== 'super_admin') {
+      console.warn('Refusing to deactivate a super admin from a non-super-admin session.');
+      return false;
+    }
+
     u.is_active = !u.is_active;
     if (this.supabaseClient) {
       // Whole-row upsert: the account may never have landed (created before
@@ -1817,12 +1863,7 @@ class DatabaseService {
       // Register ids before adopting the shop so realtime events resolve here,
       // then pull the shop + catalogue onto a till that has never seen them —
       // now scoped by the caller's own RLS session, not an anonymous key.
-      bindMirrorId(user.id);
-      if (user.tenant_id) {
-        bindMirrorId(user.tenant_id);
-        await this.adoptRemoteShop(user.tenant_id);
-        await this.adoptRemoteCatalogue(user.tenant_id);
-      }
+      await this.adoptRemoteFor(user);
 
       const existing = this.users.find((u) => u.id === user.id);
       if (existing) {
@@ -1873,6 +1914,83 @@ class DatabaseService {
 
     this.setCurrentUser(user);
     return { success: true, user };
+  }
+
+  /**
+   * Pull whatever this session is entitled to see onto the mirror.
+   *
+   * Runs at sign-in and at session restore. A shop-scoped user adopts their
+   * own shop and catalogue — that is the path that always existed. A super
+   * admin has no `tenant_id`, so the `if (user.tenant_id)` guard used to skip
+   * them entirely and a super-admin dashboard only ever rendered whatever
+   * that one browser happened to hold in localStorage. They now adopt the
+   * whole platform instead (RLS decides exactly which rows that is).
+   */
+  private async adoptRemoteFor(user: UserAccount): Promise<void> {
+    bindMirrorId(user.id);
+    if (user.tenant_id) {
+      bindMirrorId(user.tenant_id);
+      await this.adoptRemoteShop(user.tenant_id);
+      await this.adoptRemoteCatalogue(user.tenant_id);
+      return;
+    }
+    if (user.role === 'super_admin') {
+      await this.adoptRemotePlatform();
+    }
+  }
+
+  /**
+   * Adopt every platform row a super-admin session can read.
+   *
+   * The Super Admin Dashboard aggregates across shops, so a tenant-scoped
+   * pull would show it nothing. Each master table comes whole — the session
+   * only runs as a super admin, and RLS re-derives that server-side on every
+   * query — while sales, the one unbounded table, arrive most-recent-first up
+   * to {@link PLATFORM_SALES_LIMIT}.
+   *
+   * Coalesced: a fresh sign-in triggers this from both `login()` and the
+   * auth-state listener, and two concurrent pulls would each miss the other's
+   * rows and push duplicates. One flight at a time; later calls join it, and
+   * the next session event starts a fresh one.
+   *
+   * {@link notify} fires when the pull lands so an already-open dashboard
+   * re-renders instead of waiting for a reload.
+   */
+  private adoptRemotePlatform(): Promise<void> {
+    if (this.platformAdopt) return this.platformAdopt;
+    this.platformAdopt = this.pullRemotePlatform().finally(() => {
+      this.platformAdopt = null;
+    });
+    return this.platformAdopt;
+  }
+
+  private async pullRemotePlatform(): Promise<void> {
+    const client = this.supabaseClient;
+    if (!client) return;
+
+    await this.adoptRows('the shops', this.tenants, adoptTenant, () =>
+      client.from('tenants').select('*'),
+    );
+    await this.adoptRows('the branches', this.branches, adoptBranch, () =>
+      client.from('branches').select('*'),
+    );
+    await this.adoptRows('the staff roster', this.users, adoptUser, () =>
+      client.from('users').select('*'),
+    );
+    await this.adoptRows('the categories', this.categories, adoptCategory, () =>
+      client.from('product_categories').select('*'),
+    );
+    await this.adoptRows('the products', this.products, adoptProduct, () =>
+      client.from('products').select('*'),
+    );
+    await this.adoptRows('the sales', this.sales, adoptSale, () =>
+      client
+        .from('sales')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(PLATFORM_SALES_LIMIT),
+    );
+    this.notify();
   }
 
   /**
@@ -1967,6 +2085,12 @@ class DatabaseService {
    * nullable in places the app's types are not — and its id is registered so
    * a realtime event or a later re-sync lands on this row instead of adding a
    * second copy under a freshly hashed id.
+   *
+   * Dedupe is keyed on each held row's *mirror* key as well as its own id:
+   * a row this device created is stored under an app id (`tenant-1761…`)
+   * while the database returns the deterministic UUID that id syncs under, so
+   * without `toUuid` the same shop would be adopted twice on a super-admin's
+   * first platform pull.
    */
   private async adoptRows<T extends { id: string }>(
     label: string,
@@ -1974,13 +2098,27 @@ class DatabaseService {
     wrap: (raw: Record<string, unknown>) => T,
     load: () => PromiseLike<{ data: unknown; error: { message: string } | null }>
   ): Promise<void> {
-    const { data, error } = await load();
+    let data: unknown;
+    let error: { message: string } | null = null;
+    try {
+      ({ data, error } = await load());
+    } catch (err) {
+      // Offline, expired token, DNS failure — the app is local-first and the
+      // mirror must keep working, so an unreachable network degrades to "no
+      // new rows", never to a rejected adoption promise the caller awaited.
+      console.warn(`Remote sign-in could not load ${label}:`, err instanceof Error ? err.message : String(err));
+      return;
+    }
     if (error) {
       console.warn(`Remote sign-in could not load ${label}:`, error.message);
       return;
     }
 
-    const held = new Set(store.map((row) => row.id));
+    const held = new Set<string>();
+    for (const row of store) {
+      held.add(row.id);
+      held.add(toUuid(row.id));
+    }
     const rows = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
     for (const raw of rows) {
       const adopted = wrap(raw);

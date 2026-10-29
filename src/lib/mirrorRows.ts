@@ -13,7 +13,17 @@
  * reconstructed explicitly rather than spread, which doubles as a record of
  * what the round trip actually preserves.
  */
-import type { Customer, Product, ProductCategory, Sale, SaleItem } from '../types/index.ts';
+import type {
+  Branch,
+  Customer,
+  Product,
+  ProductCategory,
+  Sale,
+  SaleItem,
+  Tenant,
+  UserAccount,
+  UserRole,
+} from '../types/index.ts';
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 
@@ -137,5 +147,74 @@ function adoptSaleItem(value: unknown, saleId: string): SaleItem {
     discount_amount: number(raw.discount_amount),
     tax_amount: number(raw.tax_amount),
     total_amount: number(raw.total_amount),
+  };
+}
+
+const SUBSCRIPTION_STATUSES = new Set(['active', 'trial', 'past_due', 'suspended']);
+
+/**
+ * A shop pulled onto a session that did not create it — today, a super-admin
+ * dashboard loading the whole platform at sign-in.
+ */
+export function adoptTenant(raw: Record<string, unknown>): Tenant {
+  const status = text(raw.subscription_status);
+  return {
+    id: text(raw.id),
+    name: text(raw.name),
+    slug: text(raw.slug),
+    logo_url: optionalText(raw.logo_url),
+    phone: text(raw.phone),
+    email: text(raw.email),
+    address: text(raw.address),
+    tax_number: optionalText(raw.tax_number),
+    currency: text(raw.currency) || 'GHS',
+    is_active: raw.is_active !== false,
+    // `cancelled` passes the database CHECK but has no home in the app's union.
+    // It is a subscription that no longer pays, which is what 'suspended' says,
+    // so it maps there instead of leaking an unknown literal into the UI.
+    subscription_status: SUBSCRIPTION_STATUSES.has(status)
+      ? (status as Tenant['subscription_status'])
+      : 'suspended',
+    created_at: text(raw.created_at),
+  };
+}
+
+export function adoptBranch(raw: Record<string, unknown>): Branch {
+  return {
+    id: text(raw.id),
+    tenant_id: text(raw.tenant_id),
+    name: text(raw.name),
+    code: text(raw.code),
+    address: text(raw.address),
+    phone: optionalText(raw.phone),
+    is_main: raw.is_main === true,
+    is_active: raw.is_active !== false,
+  };
+}
+
+const USER_ROLES = new Set<UserRole>(['super_admin', 'shop_owner', 'cashier']);
+
+/**
+ * A roster row read from the mirror.
+ *
+ * Credentials are deliberately NOT restored: `password` and `pin` never leave
+ * this device (see `userRow` in sync.ts), so a row adopted from another
+ * session is a profile, not a sign-in. The role is coerced to the least
+ * privileged one if it ever arrives unknown — the database CHECK keeps this
+ * impossible in practice, but an unrecognised role must never read as staff
+ * authority in the UI.
+ */
+export function adoptUser(raw: Record<string, unknown>): UserAccount {
+  const role = text(raw.role) as UserRole;
+  return {
+    id: text(raw.id),
+    tenant_id: optionalText(raw.tenant_id),
+    shop_name: optionalText(raw.shop_name),
+    full_name: text(raw.full_name),
+    email: text(raw.email),
+    role: USER_ROLES.has(role) ? role : 'cashier',
+    phone: text(raw.phone),
+    is_active: raw.is_active !== false,
+    created_at: text(raw.created_at),
   };
 }

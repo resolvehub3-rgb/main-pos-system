@@ -1,7 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { adoptCategory, adoptCustomer, adoptProduct, adoptSale } from './mirrorRows.ts';
+import {
+  adoptBranch,
+  adoptCategory,
+  adoptCustomer,
+  adoptProduct,
+  adoptSale,
+  adoptTenant,
+  adoptUser,
+} from './mirrorRows.ts';
 
 /**
  * The shape a row actually has once it has travelled: `productRow` writes
@@ -173,4 +181,77 @@ test('adoptSale survives a row with no items array at all', () => {
   assert.deepEqual(sale.items, []);
   assert.equal(sale.invoice_number, '');
   assert.equal(sale.total_amount, 0);
+});
+
+test('adoptTenant maps the schema-only subscription state onto the union', () => {
+  const base = {
+    id: 't1',
+    name: 'Zen Shop Mart',
+    slug: 'zen-shop-mart',
+    logo_url: null,
+    phone: '+233 24 000 0000',
+    email: 'hello@zenshop.com',
+    address: 'Spintex Road, Accra',
+    tax_number: null,
+    currency: 'GHS',
+    is_active: true,
+    subscription_status: 'active',
+    created_at: '2026-10-20T09:15:00.000Z',
+  };
+
+  const active = adoptTenant(base);
+  assert.equal(active.currency, 'GHS');
+  assert.equal(active.logo_url, undefined);
+  assert.equal(active.tax_number, undefined);
+  assert.equal(active.subscription_status, 'active');
+
+  // `cancelled` passes the database CHECK but is not in the app's union —
+  // it must read as a non-paying shop, never as an unknown literal.
+  assert.equal(adoptTenant({ ...base, subscription_status: 'cancelled' }).subscription_status, 'suspended');
+  assert.equal(adoptTenant({ ...base, subscription_status: null }).subscription_status, 'suspended');
+  // Absent flag reads as an operating shop, like every other adopter here.
+  assert.equal(adoptTenant({ ...base, is_active: null }).is_active, true);
+  assert.equal(adoptTenant({ ...base, is_active: false }).is_active, false);
+});
+
+test('adoptBranch defaults the flags the way the till expects', () => {
+  const branch = adoptBranch({
+    id: 'b1',
+    tenant_id: 't1',
+    name: 'Main Branch',
+    code: 'MAIN',
+    address: 'Oxford Street, Osu',
+    phone: null,
+    is_main: null,
+    is_active: null,
+  });
+
+  assert.equal(branch.phone, undefined);
+  assert.equal(branch.is_main, false);
+  assert.equal(branch.is_active, true);
+});
+
+test('adoptUser never restores credentials and coerces an unknown role', () => {
+  const roster = adoptUser({
+    id: 'u1',
+    tenant_id: null,
+    shop_name: null,
+    full_name: 'Kofi Boateng',
+    email: 'kofi@example.com',
+    role: 'shop_owner',
+    phone: '+233 24 111 2222',
+    is_active: true,
+    created_at: '2026-10-20T09:15:00.000Z',
+  });
+
+  // A super-admin's own roster row is the platform-level shape: no tenant.
+  assert.equal(roster.tenant_id, undefined);
+  assert.equal(roster.shop_name, undefined);
+  assert.equal(roster.role, 'shop_owner');
+  // Credentials are never mirrored, so an adopted row can carry none.
+  assert.equal(roster.password, undefined);
+  assert.equal(roster.pin, undefined);
+
+  // Unrecognised role → least privilege; it must never read as authority.
+  assert.equal(adoptUser({ id: 'u2', full_name: 'X', email: 'x@y.z', role: 'root' }).role, 'cashier');
 });

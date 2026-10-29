@@ -43,6 +43,18 @@ Rows are normalised by `src/lib/mirrorRows.ts` on the way in: the mirror stores
 blank `sku`/`unit`/`phone` as `NULL`, and handing those straight to the till
 would throw the moment it called `product.sku.toLowerCase()`.
 
+A **super admin has no shop to scope to**, so `adoptRemoteFor` pulls the whole
+platform instead: every tenant, branch, staff row, category and product the
+session can read (RLS re-derives super-admin on every query), plus the 2,000
+most recent sales across all shops. This is what the Super Admin Dashboard
+renders — without that pull the dashboard only ever showed the one browser's
+`localStorage` snapshot, whatever the database held. The pull is idempotent
+(only missing rows are added, deduped against each row's mirror UUID) and
+coalesced so a sign-in triggered from both `login()` and the auth-state
+listener cannot race itself into duplicates; it re-runs on every Supabase
+session event, so a reload catches up with rows created while the tab was
+closed.
+
 **Not yet adopted:** `inventory_movements` and `expenses`. A stock book built
 from a partial ledger would report wrong balances, so the device that owns the
 history keeps it — Stock Book and expense reports start empty on a second
@@ -73,8 +85,10 @@ straight to Postgres fails a cast on every row.
 - `toUuid(appId)` — deterministic (FNV-1a → UUID v5 shape, fixed namespace), so
   the same app id always produces the same UUID. Re-syncing **upserts** the row
   instead of creating a duplicate.
-- `fromUuid(uuid)` — the reverse lookup, used to recognise realtime echoes of
-  rows this tab just wrote so they aren't appended a second time under a UUID.
+- `fromUuid(uuid)` — the reverse lookup, used to recognise realtime payloads
+  for rows this tab wrote or adopted so they are merged, not appended a second
+  time under a UUID. An *unresolved* uuid is the signal that the row came from
+  another session: `src/lib/realtimeRows.ts` adopts it instead of dropping it.
 - App ids are never rewritten. The UI, tests, and `localStorage` keep using
   `tenant-…` / `prod-…`.
 
@@ -104,6 +118,10 @@ to re-run).
 | `20261024000002_app_sync_compat.sql` | Creates `public.users`, adds the `sales`/`products`/`customers` columns the app sends, drops foreign keys pointing at empty `profiles`/`auth.users`, relaxes RLS for anon writes. |
 | `20261024000003_mirror_unique_constraints.sql` | Drops four UNIQUE constraints the app does not enforce, which were discarding valid mirrored rows (see below). |
 | `20261024000004_realtime_users.sql` | Adds `public.users` to the `supabase_realtime` publication so deleting or disabling a cashier reaches other open sessions (see below). |
+| `20261029000001_lockdown_rls_and_scrub_credentials.sql` | Locks the mirror down: scrubs stored `password`/`pin` columns, revokes every `anon` grant (writes now require a Supabase Auth session), and re-grants `authenticated` the access the policies govern. |
+| `20261030000001_provisioning_rpc.sql` | The trusted shop-provisioning RPCs: `create_tenant_with_owner`, `invite_staff`, `claim_legacy_profile`. **Without this migration, shop-owner registration fails** with a "could not find the function" error from PostgREST. |
+| `20261030000002_realtime_tenants.sql` | Adds `public.tenants` to the same publication, closing the gap noted below — a shop registered from another browser now reaches an open Super Admin Dashboard. |
+| `20261030000003_tenant_membership_read_policy.sql` | Adds the missing `SELECT` policy on `public.tenant_memberships` (`user_id = auth.uid()`). **Without this migration, a shop owner who registers a shop cannot sign in** — see below. |
 
 ### Why `20261024000002` was needed
 
@@ -154,8 +172,44 @@ device while every other till kept showing the removed cashier.
 RLS and the `DELETE` grant for `anon` were already in place from
 `20261024000002`, so this migration is only the publication entry.
 
-Known gap: `public.tenants` is subscribed by the app but is also unpublished,
-so `handleRealtimeTenant` never fires either. Left for its own migration.
+The same silent gap had already been noted for `public.tenants` — subscribed
+by the app but unpublished, so `handleRealtimeTenant` never fired and a shop
+registered in another browser never reached an open dashboard.
+`20261030000002_realtime_tenants.sql` closes it the same way.
+
+### Why `20261030000003` was needed
+
+Symptom: a shop registers successfully, but the owner cannot sign in —
+*"This account is not linked to an active shop. Contact your administrator."*
+
+The registration and sign-in paths touch `tenant_memberships` in opposite
+ways:
+
+- **Registration** (`create_tenant_with_owner`) is `SECURITY DEFINER`: it runs
+  as the function owner, bypasses RLS, and inserts the membership row with no
+  policy required. That's why signup "works".
+- **Sign-in** (`resolveAuthUser`) reads `tenant_memberships` *as the
+  authenticated owner* to prove the identity belongs to an active shop. That
+  read is subject to RLS — and the table had RLS **enabled** with **zero
+  policies** anywhere in the migration history, so Postgres filtered out every
+  row. The membership exists but its own owner could never read it back.
+
+The fix is one `SELECT` policy scoped to `user_id = auth.uid()`: a user sees
+only their own memberships. No write policy is added — membership writes stay
+the exclusive job of the trusted RPCs, so a tampered client still cannot mint
+itself a membership.
+
+Sign-in also has a third step: reading the `public.users` roster row by
+email. The provisioning RPC deliberately does **not** create that row (it is
+the app-managed staff list, written when an owner invites staff), so without a
+further change the owner would just hit the next error, `no_roster`.
+`resolveAuthUser` therefore treats the roster row as **optional** when a
+verified profile + active membership already exist: the roster row is still
+used when present (including its `is_active` check), but when absent the user
+is built from `profile.role` (escalation-trigger-protected) plus the active
+membership, with the shop name fetched from `tenants`. A genuine roster *read
+failure* (network/permission) still returns `no_roster` rather than being
+swallowed.
 
 ## Tables the app actually writes
 

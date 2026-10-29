@@ -4,6 +4,7 @@ import LandingApp from '../landing/src/App.tsx';
 import {CustomerDisplayWindow} from './components/CustomerDisplayWindow.tsx';
 import {SplashScreen} from './components/SplashScreen.tsx';
 import {initInstallPrompt, registerServiceWorker} from './lib/pwa.ts';
+import {isAuthEntryPath, WORKSPACE_PATHS} from './lib/roleRoute.ts';
 import './index.css';
 import '../landing/src/index.css';
 
@@ -30,7 +31,10 @@ const isCustomerDisplayView =
   new URLSearchParams(window.location.search).get('view') === 'customer-display';
 const isPosRoute =
   typeof window !== 'undefined' &&
-  ['/app', '/login', '/register'].includes(window.location.pathname);
+  // Auth entry points (/login, /register) plus the per-role workspaces
+  // (/admin, /shop-owner, /cashier — see src/lib/roleRoute.ts).
+  (isAuthEntryPath(window.location.pathname) ||
+    WORKSPACE_PATHS.includes(window.location.pathname));
 
 createRoot(document.getElementById('root')!).render(
   isCustomerDisplayView ? <CustomerDisplayWindow /> : isPosRoute ? (
