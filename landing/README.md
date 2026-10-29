@@ -16,27 +16,26 @@ works like an installed application. The web-app address is configured in
 `src/config/site.ts` (`SITE.webAppUrl`); while it is empty, the site never
 links to a not-yet-published address.
 
-This folder is a **standalone workspace**. It is completely separate from the
-SamTill POS application in the repository root.
+This folder contains the marketing site source, which is now integrated into
+the SamTill POS application in the repository root. The root app serves the
+marketing homepage at `/` and the POS authentication screens at `/login`,
+`/register`, and `/app`, all on one origin. The marketing **Register** button
+opens the POS shop-owner registration tab at `/register`.
 
 ## Isolation guarantees
 
-- Own `package.json`, own `node_modules`, own Vite config → no dependency
-  sharing with the POS app.
-- Build output goes to `landing/dist` and never touches the root `dist/`.
-- No database, **no provisioned backend, no API keys** — the commerce API in
-  `api/` fails closed (HTTP 503) until an owner-approved commerce project and
-  its environment variables exist (nothing is set, and no secrets are stored in
-  this repo, ever). The account UI ships a Supabase **auth client**
-  (`@supabase/supabase-js`) that is only ever configured with the commerce
-  project's publishable anon key via `VITE_COMMERCE_SUPABASE_URL` /
-  `VITE_COMMERCE_SUPABASE_ANON_KEY`, and only becomes reachable when the
-  account feature flags are switched on.
-- The POS app, its Supabase project and its `.env` are never read, copied or
-  modified from here; the commerce system is designed for its own future,
-  separate Supabase project.
-- Nothing in the POS source tree is imported or modified by this site.
-- Runs on its own port (`pnpm dev` → 5174), clear of the POS dev server (3000).
+- The root Vite app builds and serves both the POS and marketing site.
+- The optional commerce API has **no provisioned backend or API keys** and
+  fails closed (HTTP 503) until an owner-approved commerce project and its
+  environment variables exist. The marketing site's customer-account UI uses
+  only that separate commerce project's publishable anon key via
+  `VITE_COMMERCE_SUPABASE_URL` / `VITE_COMMERCE_SUPABASE_ANON_KEY`.
+- The POS login and shop-owner registration use the POS app's existing auth
+  configuration. They are separate from the optional commerce customer
+  account flow.
+- No secrets are stored in this repo.
+- Start the integrated app from the repository root with `pnpm dev` on port
+  3000; do not start a second landing-site server.
 
 ## Commerce preparation (code ready — backend not provisioned)
 
@@ -49,28 +48,26 @@ SamTill POS application in the repository root.
 | API handlers (status/plans/checkout/verify/subscription/webhook) | `api/` | implemented, fail-closed, unit-tested |
 | Database schema + RLS | `db/migrations/0001_commerce_init.sql` | prepared, **never executed** |
 | Approved plan rows | `db/seeds/0001_approved_plans.sql` | prepared; run after the migration |
-| Account UI (register / verify / login / reset / account / checkout) | `src/pages/*Page.tsx`, `src/lib/authFlow.ts`, `src/lib/checkoutClient.ts` | implemented, flags `false` |
+| Optional commerce customer-account UI (separate from POS shop-owner registration) | `src/pages/*Page.tsx`, `src/lib/authFlow.ts`, `src/lib/checkoutClient.ts` | implemented; requires commerce configuration |
 | Unit tests | `tests/` | pure unit tests, no network/database |
 | Site preview section (inert) | `src/components/CommercePreview.tsx`, `src/config/commerce.ts` | all capability flags `false` |
 
-There is no working payment on the public site **yet**. The
+There is no working payment on the public site **yet**. The optional commerce
 register / login / verify / account / checkout pages exist at hash
 routes (`/#/register`, `/#/login`, `/#/verify`, `/#/forgot-password`,
 `/#/reset-password`, `/#/account`, `/#/checkout`) but every
-"buy" call to action is hidden while `COMMERCE.accountEnabled`
-/ `COMMERCE.paymentsEnabled` are `false` in
-`src/config/commerce.ts` — and even then the API independently refuses to
-serve prices (`PUBLISH_PRICES`) or start checkout (`CHECKOUT_ENABLED`). The
-price on the checkout screen is whatever the server publishes in the `plans`
-table; the browser never sends a price.
+"buy" call to action is hidden while `COMMERCE.paymentsEnabled` is `false` in
+`src/config/commerce.ts`; account screens also require the commerce service to
+be configured. The API independently refuses to serve prices
+(`PUBLISH_PRICES`) or start checkout (`CHECKOUT_ENABLED`). The main site's
+Register button goes to the POS shop-owner registration at `/register`. The
+price on the optional commerce checkout screen is whatever the server
+publishes in the `plans` table; the browser never sends a price.
 
 ## Development
 
-```bash
-cd landing
-pnpm install     # first time only — installs into landing/node_modules
-pnpm dev         # http://localhost:5174
-```
+Run `pnpm dev` from the repository root; the integrated app is available at
+`http://localhost:3000`.
 
 ## Checks
 
@@ -78,8 +75,6 @@ pnpm dev         # http://localhost:5174
 cd landing
 pnpm lint        # TypeScript type check (src, api and tests)
 pnpm test        # commerce unit tests — no network, no database
-pnpm build       # production build → landing/dist (api/ is never bundled)
-pnpm preview     # serve the production build locally (http://localhost:4173)
 ```
 
 ## Editing content — where changes go

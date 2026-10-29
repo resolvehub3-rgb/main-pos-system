@@ -1,9 +1,11 @@
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import LandingApp from '../landing/src/App.tsx';
 import {CustomerDisplayWindow} from './components/CustomerDisplayWindow.tsx';
 import {SplashScreen} from './components/SplashScreen.tsx';
 import {initInstallPrompt, registerServiceWorker} from './lib/pwa.ts';
 import './index.css';
+import '../landing/src/index.css';
 
 /**
  * The customer display popup window loads `/?view=customer-display` (opened
@@ -26,14 +28,17 @@ initInstallPrompt();
 const isCustomerDisplayView =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).get('view') === 'customer-display';
+const isPosRoute =
+  typeof window !== 'undefined' &&
+  ['/app', '/login', '/register'].includes(window.location.pathname);
 
 createRoot(document.getElementById('root')!).render(
-  isCustomerDisplayView ? (
-    <CustomerDisplayWindow />
-  ) : (
+  isCustomerDisplayView ? <CustomerDisplayWindow /> : isPosRoute ? (
     <>
-      <App />
+      <App initialAuthTab={window.location.pathname === '/register' ? 'register' : 'login'} />
       <SplashScreen />
     </>
+  ) : (
+    <LandingApp />
   ),
 );

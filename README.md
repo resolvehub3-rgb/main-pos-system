@@ -29,13 +29,19 @@ is committed).
 
 ```bash
 pnpm install        # install dependencies
-pnpm dev            # dev server on http://localhost:3000
+pnpm dev            # unified marketing site + POS on http://localhost:3000
 pnpm lint           # tsc --noEmit (type check)
 pnpm test           # unit tests (node:test via tsx)
-pnpm build          # production build → dist/
+pnpm build          # production build → dist/ (marketing site at /, POS at /app)
 pnpm preview        # serve the production build locally
 pnpm print-bridge   # optional local receipt-print bridge (see docs/PRINTING.md)
 ```
+
+The marketing site is served at `/`; its **Register** button opens the POS
+shop-owner registration tab at `/register` on the same origin. `/login` opens
+the POS sign-in tab. The former standalone landing workspace is now part of
+this app; run the root `pnpm dev` command rather than starting a second Vite
+server from `landing/`.
 
 Copy `.env.example` to `.env` and fill in the Supabase project URL and anon
 key. **Never put a secret in a `VITE_` variable** — Vite compiles those into

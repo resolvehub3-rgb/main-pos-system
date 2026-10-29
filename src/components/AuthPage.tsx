@@ -16,11 +16,12 @@ import { UserAccount } from '../types';
 import { db } from '../lib/supabaseClient';
 
 interface AuthPageProps {
+  initialTab?: 'login' | 'register';
   onLoginSuccess: (user: UserAccount) => void;
 }
 
-export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
-  const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
+export const AuthPage: React.FC<AuthPageProps> = ({ initialTab = 'login', onLoginSuccess }) => {
+  const [activeTab, setActiveTab] = useState<'login' | 'register'>(initialTab);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -139,9 +140,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Works online and offline</span>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Works online and offline</span>
+            </div>
+            <a
+              href="/"
+              className="text-xs font-bold text-orange-300 transition-colors hover:text-orange-200"
+            >
+              ← Back to home
+            </a>
           </div>
         </div>
       </header>

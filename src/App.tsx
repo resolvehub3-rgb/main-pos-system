@@ -20,7 +20,7 @@ import {
 } from './lib/customerDisplayChannel';
 import { ArrowLeft, Store } from 'lucide-react';
 
-export default function App() {
+export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login' | 'register'} = {}) {
   // Authentication & Current User Session
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => db.getCurrentUser());
   const [selectedShopId, setSelectedShopId] = useState<string>('tenant-accra-mall');
@@ -181,6 +181,7 @@ export default function App() {
   if (!currentUser) {
     return (
       <AuthPage
+        initialTab={initialAuthTab}
         onLoginSuccess={(user) => {
           setCurrentUser(user);
           if (user.tenant_id) {

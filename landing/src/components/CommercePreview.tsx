@@ -87,7 +87,7 @@ export default function CommercePreview() {
           <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2">
             {accountGate.available && (
               <a
-                href="#/register"
+                href="/register"
                 className="rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
               >
                 Create an account →

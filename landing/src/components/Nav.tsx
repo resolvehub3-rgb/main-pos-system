@@ -11,11 +11,9 @@ export default function Nav() {
   // the deployment is actually configured — no promises the site cannot keep.
   const accountGate = accountAvailability(COMMERCE, readCommerceEnv());
   const accountLinks = [
-    ...(accountGate.available ? [{label: 'Sign in', href: '#/login'}] : []),
+    ...(accountGate.available ? [{label: 'Sign in', href: '/login'}] : []),
   ];
-  // The Register call to action only shows when the account service can
-  // actually work here — never a dead form.
-  const registerCta = accountGate.available ? {label: 'Register', href: '#/register'} : null;
+  const registerCta = {label: 'Register', href: '/register'};
 
   useEffect(() => {
     const onResize = () => {
