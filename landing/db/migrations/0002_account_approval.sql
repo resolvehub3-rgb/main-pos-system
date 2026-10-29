@@ -53,6 +53,18 @@ begin;
 -- blocking the approval transaction. Available on Supabase.
 create extension if not exists pg_net;
 
+-- Keep this migration's timestamp triggers usable even if the shared helper
+-- was not carried over when the prerequisite schema was provisioned.
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
 
 -- -----------------------------------------------------------------------------
 -- 1. Enumerated type: account approval status
@@ -373,7 +385,10 @@ create or replace function public.send_approval_email()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+-- search_path deliberately NOT pinned here: every table referenced below is
+-- schema-qualified (public.*), so nothing can be hijacked, and the pg_net call
+-- (net.http_post) needs Supabase's DEFAULT search_path to resolve the `net`
+-- extension schema. The data-modifying/admin RPCs above DO pin their path.
 as $$
 declare
   api_key   text;
