@@ -1,17 +1,15 @@
 import {CONTACT, CONTACT_PENDING} from '../config/contact';
 import {COMMERCE} from '../config/commerce';
 import {FOOTER_LINKS, NAV_LINKS, SITE} from '../config/site';
-import {accountAvailability, downloadAvailability} from '../lib/availability';
+import {accountAvailability} from '../lib/availability';
 import {readCommerceEnv} from '../lib/commerceClient';
 
 export default function Footer() {
   const year = new Date().getFullYear();
 
   // Mirror the availability the site actually has: the footer must never
-  // claim "no registrations/downloads" once those screens are switched on.
-  const selfServiceOpen =
-    accountAvailability(COMMERCE, readCommerceEnv()).available ||
-    downloadAvailability(COMMERCE, readCommerceEnv()).available;
+  // claim "no registrations" once those screens are switched on.
+  const selfServiceOpen = accountAvailability(COMMERCE, readCommerceEnv()).available;
 
   return (
     <footer className="border-t border-navy-800 bg-navy-950">
@@ -87,7 +85,7 @@ export default function Footer() {
               confirmation.{' '}
               {selfServiceOpen
                 ? 'Online payments are not offered on this site.'
-                : 'No downloads, online payments or registrations are offered on this site.'}
+                : 'No online payments or registrations are offered on this site.'}
             </p>
           )}
         </div>

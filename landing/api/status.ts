@@ -19,7 +19,6 @@ const ENDPOINTS: Array<{method: string; path: string; status: string}> = [
   {method: 'POST', path: '/api/webhooks/paystack', status: 'implemented_requires_backend_and_approval'},
   {method: 'GET', path: '/api/subscription', status: 'implemented_requires_backend'},
   {method: 'POST', path: '/api/subscription', status: 'skeleton_not_implemented'},
-  {method: 'POST', path: '/api/download', status: 'implemented_requires_backend'},
 ];
 
 export function GET(request: Request): Response {
@@ -41,9 +40,6 @@ export function GET(request: Request): Response {
       publishPrices: readFlag('PUBLISH_PRICES'),
       allowLivePayments: readFlag('ALLOW_LIVE_PAYMENTS'),
     },
-    // Access mode for POST /api/download. Reported for reviewers only; it
-    // takes effect solely when the backend is fully configured.
-    downloadAccessMode: configResult.ok ? configResult.config.downloadAccessMode : 'entitlement',
     endpoints: ENDPOINTS,
     documentation: [
       'landing/docs/01-commercial-decisions.md',

@@ -9,10 +9,7 @@
  */
 
 import {assert, assertEqual, test} from './harness.ts';
-import {
-  accountAvailability,
-  downloadAvailability,
-} from '../src/lib/availability.ts';
+import {accountAvailability} from '../src/lib/availability.ts';
 import {
   classifyAuthError,
   registerAccount,
@@ -171,21 +168,9 @@ test('gates: registration form appears only when switched on AND configured', ()
   assertEqual(result.reason, 'available');
 });
 
-test('gates: download requires the download switch, the account switch and configuration', () => {
-  const configured = {supabaseUrl: 'https://x.supabase.co', supabaseAnonKey: 'sb_publishable_x'};
-  assertEqual(downloadAvailability({accountEnabled: false, downloadEnabled: false}, configured).reason, 'disabled');
-  assertEqual(downloadAvailability({accountEnabled: false, downloadEnabled: true}, configured).reason, 'disabled');
-  assertEqual(
-    downloadAvailability({accountEnabled: true, downloadEnabled: true}, {}).reason,
-    'not_configured',
-  );
-  assertEqual(downloadAvailability({accountEnabled: true, downloadEnabled: true}, configured).available, true);
-});
-
 test('gates: shipped commerce flags are still off (payments and pricing untouched)', () => {
   assertEqual(COMMERCE.accountEnabled, false, 'accountEnabled ships false');
   assertEqual(COMMERCE.paymentsEnabled, false, 'paymentsEnabled ships false');
-  assertEqual(COMMERCE.downloadEnabled, false, 'downloadEnabled ships false');
 });
 
 // ---------------------------------------------------------------------------
@@ -194,11 +179,11 @@ test('gates: shipped commerce flags are still off (payments and pricing untouche
 
 test('routing: account routes are recognised, section anchors are not', () => {
   assertEqual(parseRoute('#/register', '').path, '/register');
-  assertEqual(parseRoute('#/download?x=1', '').path, '/download');
+  assertEqual(parseRoute('#/checkout?x=1', '').path, '/checkout');
   assertEqual(parseRoute('#features', '').path, '/', 'section anchor stays on the home page');
   assertEqual(parseRoute('', '').path, '/');
-  assert(isAccountRoute('/register') && isAccountRoute('/download'), 'account routes known');
-  assert(!isAccountRoute('/'), 'home is not an account route');
+  assert(isAccountRoute('/register') && isAccountRoute('/checkout'), 'account routes known');
+  assert(!isAccountRoute('/') && !isAccountRoute('/download'), 'home and removed routes are not account routes');
 });
 
 test('routing: email-link parameters are read from the hash and the query string', () => {
@@ -215,8 +200,8 @@ test('routing: email-link parameters are read from the hash and the query string
 });
 
 test('routing: next parameter only allows known account destinations', () => {
-  const download = parseRoute('#/login?next=download', '');
-  assertEqual(nextRouteAfterSignIn(download.params), '/download');
+  const register = parseRoute('#/login?next=register', '');
+  assertEqual(nextRouteAfterSignIn(register.params), '/register');
   const junk = parseRoute('#/login?next=https://evil.example', '');
   assertEqual(nextRouteAfterSignIn(junk.params), '/account', 'unknown next falls back to the account page');
   const plain = parseRoute('#/login', '');

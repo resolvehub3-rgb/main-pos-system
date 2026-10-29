@@ -1,18 +1,16 @@
 import {useEffect, useState} from 'react';
 import {COMMERCE} from '../config/commerce';
 import {NAV_LINKS, SITE} from '../config/site';
-import {accountAvailability, downloadAvailability} from '../lib/availability';
+import {accountAvailability} from '../lib/availability';
 import {readCommerceEnv} from '../lib/commerceClient';
 
 export default function Nav() {
   const [open, setOpen] = useState(false);
 
-  // Account/download links appear only when the owner switches them on AND
+  // Account links appear only when the owner switches them on AND
   // the deployment is actually configured — no promises the site cannot keep.
   const accountGate = accountAvailability(COMMERCE, readCommerceEnv());
-  const downloadGate = downloadAvailability(COMMERCE, readCommerceEnv());
   const accountLinks = [
-    ...(downloadGate.available ? [{label: 'Download', href: '#/download'}] : []),
     ...(accountGate.available ? [{label: 'Sign in', href: '#/login'}] : []),
   ];
 

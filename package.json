@@ -5,7 +5,6 @@
   "description": "Multi-tenant supermarket and retail POS for Ghanaian businesses — barcode checkout, inventory ledger, live sales analytics and role-based access.",
   "author": "SamTill",
   "type": "module",
-  "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
@@ -13,12 +12,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "tsx --test src/lib/*.test.ts",
-    "print-bridge": "tsx print-bridge/server.ts",
-    "desktop:assets": "tsx scripts/make-ico.ts",
-    "desktop:build": "node scripts/build-electron.mjs",
-    "desktop:dev": "node scripts/desktop-dev.mjs",
-    "desktop:smoke": "node scripts/desktop-smoke.mjs",
-    "desktop:dist": "pnpm run build && pnpm run desktop:assets && pnpm run desktop:build && electron-builder --win nsis --config electron-builder.config.cjs"
+    "print-bridge": "tsx print-bridge/server.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -42,9 +36,6 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "electron": "^45.0.0",
-    "electron-builder": "^26.18.0",
-    "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

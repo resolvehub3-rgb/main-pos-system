@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Lock,
   Mail,
@@ -14,8 +14,6 @@ import {
 } from 'lucide-react';
 import { UserAccount } from '../types';
 import { db } from '../lib/supabaseClient';
-import { WindowControls } from './WindowControls';
-import { isDesktop, toggleMaximizeWindow } from '../lib/desktopBridge';
 
 interface AuthPageProps {
   onLoginSuccess: (user: UserAccount) => void;
@@ -26,24 +24,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
-  const [scrolled, setScrolled] = useState<boolean>(false);
-
-  // Elevate the sticky navbar once the page starts scrolling
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
-  // Desktop (frameless) chrome: the brand bar doubles as the window's drag
-  // handle and hosts the min/max/close controls. Inert on the web.
-  const desktop = isDesktop();
-  const handleHeaderDoubleClick = (event: React.MouseEvent) => {
-    if (!desktop) return;
-    if ((event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
-    toggleMaximizeWindow();
-  };
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState<string>('');
@@ -101,17 +81,31 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      const result = db.register({
-        full_name: regFullName,
-        email: regEmail,
-        phone: regPhone,
-        password: regPassword,
-        pin: regPin || '1234',
-        role: 'shop_owner',
-        shop_name: regShopName,
-        shop_address: regShopAddress,
-      });
+    setTimeout(async () => {
+      // When a Supabase client is configured, registration goes through the
+      // trusted server-side path (auth.signUp + SECURITY DEFINER RPC) so no
+      // tenant/profile/membership row is ever inserted directly by the client.
+      // With no client (pure-offline till / test harness) it falls back to the
+      // device-local path, which never touches the mirror.
+      const result = db.getConfig().url
+        ? await db.registerOnline({
+            full_name: regFullName,
+            email: regEmail,
+            phone: regPhone,
+            password: regPassword,
+            shop_name: regShopName,
+            shop_address: regShopAddress,
+          })
+        : db.register({
+            full_name: regFullName,
+            email: regEmail,
+            phone: regPhone,
+            password: regPassword,
+            pin: regPin || '1234',
+            role: 'shop_owner',
+            shop_name: regShopName,
+            shop_address: regShopAddress,
+          });
 
       setLoading(false);
       if (result.success && result.user) {
@@ -132,12 +126,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
       </div>
 
       {/* Top Brand Bar */}
-      <header
-        className={`sticky top-0 z-30 border-b border-slate-800/80 bg-[#102A4C]/70 backdrop-blur-md px-6 py-4 transition-shadow duration-300${
-          scrolled ? ' shadow-lg shadow-black/30' : ''
-        }${desktop ? ' samtill-drag-region' : ''}`}
-        onDoubleClick={handleHeaderDoubleClick}
-      >
+      <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-[#102A4C]/70 backdrop-blur-md px-6 py-4 transition-shadow duration-300">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
@@ -153,7 +142,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>Works online and offline</span>
-            {desktop && <WindowControls />}
           </div>
         </div>
       </header>

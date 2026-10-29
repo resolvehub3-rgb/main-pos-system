@@ -53,8 +53,8 @@ dialog. Nothing breaks by not installing it.
 The bridge ships with this repository — there is nothing extra to download.
 
 ```bash
-npm install
-npm run print-bridge
+pnpm install
+pnpm print-bridge
 ```
 
 You should see:
@@ -172,7 +172,7 @@ reload the till page.
 ## Troubleshooting
 
 **Settings says "Not running"**
-Start the bridge with `npm run print-bridge` and click **Refresh**. The app and
+Start the bridge with `pnpm print-bridge` and click **Refresh**. The app and
 the bridge must be on the same machine unless you configured
 `VITE_PRINT_BRIDGE_URL`.
 
@@ -207,7 +207,7 @@ You are on *Automatic* and the browser dialog was dismissed. Switch to
 Run the bridge with the `file` transport and send a job:
 
 ```bash
-PRINT_TRANSPORT=file PRINT_SPOOL_DIR=./print-spool npm run print-bridge
+PRINT_TRANSPORT=file PRINT_SPOOL_DIR=./print-spool pnpm print-bridge
 ```
 
 Each receipt is written to `print-spool/receipt-<timestamp>.bin`. These files
@@ -223,7 +223,7 @@ Receipts are generated as ESC/POS by `src/lib/escpos.ts`, which is covered by
 tests in `src/lib/escpos.test.ts`:
 
 ```bash
-npx tsx --test src/lib/escpos.test.ts
+pnpm exec tsx --test src/lib/escpos.test.ts
 ```
 
 Widths are 32 columns for 58 mm and 48 columns for 80 mm.

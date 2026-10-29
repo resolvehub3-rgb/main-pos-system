@@ -16,9 +16,9 @@ interface CustomerDisplayModalProps {
 /**
  * The customer-facing screen.
  *
- * One component, two hosts: the in-page preview modal (browser/PWA and
- * single-monitor desktop) and the native second-monitor window
- * (`CustomerDisplayWindow`, Electron). It only ever receives the narrow
+ * One component, two hosts: the in-page preview modal (single-monitor
+ * fallback) and the second-monitor popup window (`CustomerDisplayWindow`).
+ * It only ever receives the narrow
  * customer projection — never internal product or tenant data.
  */
 export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({

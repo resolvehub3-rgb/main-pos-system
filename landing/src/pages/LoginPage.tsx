@@ -132,7 +132,7 @@ export default function LoginPage({route}: {route: ParsedRoute}) {
   return (
     <AccountShell
       title="Sign in"
-      subtitle="Access your SamTill account and Windows installer downloads."
+      subtitle="Access your SamTill account and licence information."
       footer={
         <p>
           New here?{' '}

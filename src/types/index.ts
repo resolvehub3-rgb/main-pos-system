@@ -70,7 +70,7 @@ export interface CartItem {
 /**
  * Customer-facing projection of one cart line.
  *
- * The customer display (in-page modal or the Electron second-monitor window)
+ * The customer display (in-page modal or the second-monitor popup window)
  * only ever sees these fields — never cost, stock, tenant ids or any other
  * internal product data. Built by `src/lib/customerDisplay.ts`.
  */
@@ -85,7 +85,8 @@ export interface CustomerDisplayItem {
 /**
  * Everything the customer display is allowed to show: shop name, the projected
  * cart lines and the amount due. This is the exact payload that travels from
- * the cashier window to the customer display window over Electron IPC.
+ * the cashier window to the customer display popup over BroadcastChannel
+ * (src/lib/customerDisplayChannel.ts).
  */
 export interface CustomerDisplayState {
   tenantName: string;

@@ -1,11 +1,10 @@
 import {COMMERCE} from '../config/commerce';
-import {accountAvailability, downloadAvailability} from '../lib/availability';
+import {accountAvailability} from '../lib/availability';
 import {readCommerceEnv} from '../lib/commerceClient';
 import {Reveal} from './Reveal';
 
 /**
- * Additive preview of the customer area (accounts → payment → installer
- * download).
+ * Additive preview of the customer area (accounts → payment).
  *
  * While every capability flag is off the section is purely informational —
  * status rows and a link to the existing contact section, no forms or
@@ -17,18 +16,13 @@ import {Reveal} from './Reveal';
 const CAPABILITIES = [
   {
     label: 'Customer accounts',
-    detail: 'Sign in with your email to manage your licence and downloads.',
+    detail: 'Sign in with your email to manage your licence and account.',
     available: COMMERCE.accountEnabled,
   },
   {
     label: 'Online payment',
     detail: 'Card and mobile-money checkout — currently in test-mode preparation only.',
     available: COMMERCE.paymentsEnabled,
-  },
-  {
-    label: 'Installer download',
-    detail: 'A short-lived, hash-verified link to the Windows installer for subscribers.',
-    available: COMMERCE.downloadEnabled,
   },
 ] as const;
 
@@ -43,10 +37,8 @@ function statusChip(available: boolean): string {
 export default function CommercePreview() {
   if (!COMMERCE.sectionEnabled) return null;
 
-  const selfServiceOpen =
-    COMMERCE.accountEnabled || COMMERCE.downloadEnabled;
+  const selfServiceOpen = COMMERCE.accountEnabled;
   const accountGate = accountAvailability(COMMERCE, readCommerceEnv());
-  const downloadGate = downloadAvailability(COMMERCE, readCommerceEnv());
 
   return (
     <section id="accounts" className="bg-slate-50 py-20 lg:py-28">
@@ -57,13 +49,13 @@ export default function CommercePreview() {
           </p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-navy-950 sm:text-4xl">
             {selfServiceOpen
-              ? 'Your SamTill account and installer download'
-              : 'Accounts, online payment and installer downloads — coming soon'}
+              ? 'Your SamTill account'
+              : 'Accounts and online payment — coming soon'}
           </h2>
           <p className="mt-4 text-base leading-relaxed text-navy-800">
             {selfServiceOpen
-              ? 'Create a SamTill account with your email, sign in, and download the verified Windows installer through a short-lived link issued to your account.'
-              : 'SamTeck Digital is preparing a secure customer area for SamTill: sign in with your email, pay with card or mobile money, and download the verified Windows installer through a short-lived link that is only issued after your payment is confirmed.'}
+              ? 'Create a SamTill account with your email, sign in, and manage your licence. SamTill itself runs in the browser and installs as an app — open the web app, then use your browser’s Install app / Add to Home Screen feature.'
+              : 'SamTeck Digital is preparing a secure customer area for SamTill: sign in with your email and pay with card or mobile money for your licence.'}
           </p>
           <p className="mt-3 text-sm leading-relaxed text-navy-600">
             {selfServiceOpen
@@ -99,14 +91,6 @@ export default function CommercePreview() {
                 className="rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
               >
                 Create an account →
-              </a>
-            )}
-            {downloadGate.available && (
-              <a
-                href="#/download"
-                className="rounded-full bg-navy-900 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-navy-700"
-              >
-                Go to downloads →
               </a>
             )}
             <a

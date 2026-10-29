@@ -1,7 +1,7 @@
 /**
  * Customer-display projection helpers.
  *
- * The customer screen (in-page modal *and* the Electron second-monitor window)
+ * The customer screen (in-page modal *and* the second-monitor popup window)
  * must never see internal product data — no cost, stock, tenant ids. This is
  * the single place where a cart is narrowed to the exact fields the customer is
  * allowed to see, so both display paths stay identical by construction.
@@ -38,17 +38,3 @@ export function buildCustomerDisplayState(
   };
 }
 
-/**
- * Is a sale currently in progress?
- *
- * Used by the Electron main process as the single source of truth for the
- * frameless window's close guard: while the till holds unsold lines, closing
- * the window must ask first instead of silently discarding the cart. The
- * cashier pushes its projected cart on every change (scan, qty edit, remove,
- * clear, completed payment), so `items` is empty exactly when nothing is at
- * risk — a completed sale clears the cart, and the logged-out state pushes
- * an empty payload too.
- */
-export function hasActiveSale(state: CustomerDisplayState | null): boolean {
-  return state !== null && state.items.length > 0;
-}

@@ -40,7 +40,7 @@ import {
   verifyPayment,
   verifyWithBackoff,
 } from '../src/lib/checkoutClient.ts';
-import {checkoutAvailability, downloadAvailability} from '../src/lib/availability.ts';
+import {checkoutAvailability} from '../src/lib/availability.ts';
 import {
   ACCOUNT_ROUTES,
   isAccountRoute,
@@ -481,14 +481,6 @@ test('gates: checkout needs payments, accounts and configuration', () => {
   assert(ready.available && ready.reason === 'available');
 });
 
-test('gates: download still requires its own switch alongside payments', () => {
-  const withoutDownload = downloadAvailability({accountEnabled: true, downloadEnabled: false}, configured);
-  assert(!withoutDownload.available && withoutDownload.reason === 'disabled');
-
-  const withBoth = downloadAvailability({accountEnabled: true, downloadEnabled: true}, configured);
-  assert(withBoth.available, 'download gate unaffected by the payments flag');
-});
-
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
@@ -574,7 +566,6 @@ test('commercial: licence terms no longer promise that terms are coming', () => 
 test('commercial: the payment switch is still off until the backend exists', () => {
   assertEqual(COMMERCE.paymentsEnabled, false, 'paymentsEnabled ships false');
   assertEqual(COMMERCE.accountEnabled, false, 'accountEnabled ships false');
-  assertEqual(COMMERCE.downloadEnabled, false, 'downloadEnabled ships false');
 });
 
 test('sql: no invalid privileges are granted or revoked on a sequence', () => {

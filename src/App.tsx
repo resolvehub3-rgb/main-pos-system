@@ -9,16 +9,15 @@ import { UpdateNotice } from './components/UpdateNotice';
 import { AddProductModal } from './components/AddProductModal';
 import { SupabaseConfigModal } from './components/SupabaseConfigModal';
 import { AuthPage } from './components/AuthPage';
+import { OfflineBanner } from './components/OfflineBanner';
 import { db } from './lib/supabaseClient';
 import { UserAccount, CartItem, Sale, Product, Tenant } from './types';
 import { calculateCartTotals } from './lib/money';
 import { buildCustomerDisplayState, cartToCustomerItems } from './lib/customerDisplay';
 import {
-  isDesktop,
-  onCustomerDisplayOpened,
-  openNativeCustomerDisplay,
-  pushCustomerDisplayState,
-} from './lib/desktopBridge';
+  publishCustomerDisplayState,
+  serveCustomerDisplay,
+} from './lib/customerDisplayChannel';
 import { ArrowLeft, Store } from 'lucide-react';
 
 export default function App() {
@@ -32,6 +31,8 @@ export default function App() {
   // `autoPrint` = silent post-checkout print (no modal shown); false for reprints
   const [activeReceipt, setActiveReceipt] = useState<{ sale: Sale; autoPrint: boolean } | null>(null);
   const [showCustomerDisplay, setShowCustomerDisplay] = useState<boolean>(false);
+  // Handle to the customer display popup window (opened by a user gesture).
+  const [customerDisplayWindow, setCustomerDisplayWindow] = useState<Window | null>(null);
   const [showAddProductModal, setShowAddProductModal] = useState<boolean>(false);
   const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
 
@@ -80,7 +81,7 @@ export default function App() {
   const supabaseConfig = db.getConfig();
 
   // Cart totals for the customer display (same calculation the checkout panel
-  // uses). Computed before the auth gate so the desktop push below always has
+  // uses). Computed before the auth gate so the push below always has
   // the current amount due.
   const cartTotals = calculateCartTotals(
     cart.map((c) => ({
@@ -90,26 +91,29 @@ export default function App() {
     }))
   );
 
-  // Desktop: the cashier window is the single source of truth for the cart.
-  // Push every change (scan, quantity change, removal, clear, completed sale)
-  // to the native customer display window. Logged out → clear the customer
-  // screen. No-op in the browser/PWA.
+  // The cashier window is the single source of truth for the cart. Serve the
+  // customer display popup: answer its "request-state" ping with the cart as
+  // it is now, and forget the window handle when the display closes. Logged
+  // out → answer with an empty customer screen.
   useEffect(() => {
-    if (!isDesktop()) return;
-    pushCustomerDisplayState(
+    if (!currentUser) return;
+    return serveCustomerDisplay(
+      () => buildCustomerDisplayState(currentTenant.name, cart, cartTotals.total),
+      () => setCustomerDisplayWindow(null),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, cart, cartTotals.total, currentTenant.name]);
+
+  // Push every cart change (scan, quantity change, removal, clear, completed
+  // sale) to the customer display popup. Logged out → clear the customer
+  // screen.
+  useEffect(() => {
+    publishCustomerDisplayState(
       currentUser
         ? buildCustomerDisplayState(currentTenant.name, cart, cartTotals.total)
         : buildCustomerDisplayState('', [], 0),
     );
   }, [cart, cartTotals.total, currentTenant.name, currentUser]);
-
-  // When the native customer display window opens (opened at startup, or a
-  // monitor was just plugged in), close the in-page preview if it is showing
-  // so the two never appear at once.
-  useEffect(() => {
-    if (!isDesktop()) return;
-    return onCustomerDisplayOpened(() => setShowCustomerDisplay(false));
-  }, []);
 
   // Handle atomic sale completion
   const handleCompleteSale = (saleData: {
@@ -141,17 +145,36 @@ export default function App() {
     setShopOwnerViewingPOS(false);
   };
 
-  // Open the customer screen. Desktop: open/focus the native second-monitor
-  // window; when no suitable second display exists (or on the web) fall back
-  // to the existing in-page preview modal — same control, same intent.
+  // Open the customer screen as a separate browser window the operator drags
+  // to the customer-facing monitor. Browsers only allow windows opened from a
+  // user gesture (this button click), so it can never auto-open at startup —
+  // and if popups are blocked, fall back to the existing in-page preview
+  // modal. Same control, same intent; only the window plumbing differs.
   const openCustomerDisplay = (): void => {
-    if (!isDesktop()) {
-      setShowCustomerDisplay(true);
+    if (customerDisplayWindow && !customerDisplayWindow.closed) {
+      customerDisplayWindow.focus();
       return;
     }
-    void openNativeCustomerDisplay().then((result) => {
-      if (!result?.opened) setShowCustomerDisplay(true);
-    });
+    const popup = window.open(
+      '/?view=customer-display',
+      'samtill-customer-display',
+      'popup=yes,width=1024,height=700',
+    );
+    if (!popup) {
+      // Popup blocked → in-page modal fallback.
+      setShowCustomerDisplay(true);
+      setCustomerDisplayWindow(null);
+      return;
+    }
+    setCustomerDisplayWindow(popup);
+    // If the operator closes the popup, drop the handle so the next click
+    // re-opens it instead of focusing a dead window.
+    const poll = window.setInterval(() => {
+      if (popup.closed) {
+        window.clearInterval(poll);
+        setCustomerDisplayWindow(null);
+      }
+    }, 1000);
   };
 
   // If user is not authenticated, show the Login and Register page
@@ -182,8 +205,11 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {/* Desktop update availability (never interrupts a sale) */}
+      {/* PWA update availability (never interrupts a sale — no auto-reload) */}
       <UpdateNotice />
+
+      {/* Offline notice: the app keeps working from the local mirror */}
+      <OfflineBanner />
 
       {/* Owner previewing POS indicator banner */}
       {currentUser.role === 'shop_owner' && shopOwnerViewingPOS && (

@@ -190,9 +190,9 @@ Scripts live in `scripts/` and need `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KE
 in the environment (`tsx` does not load `.env` on its own — export them first).
 
 ```bash
-npx tsx scripts/db-status.ts     # row counts, migration markers, anon write probe
-npx tsx scripts/db-rows.ts       # actual rows + duplicate detection
-npx tsx scripts/db-verify.ts     # 20 end-to-end checks using the app's own mappers
+pnpm exec tsx scripts/db-status.ts     # row counts, migration markers, anon write probe
+pnpm exec tsx scripts/db-rows.ts       # actual rows + duplicate detection
+pnpm exec tsx scripts/db-verify.ts     # 20 end-to-end checks using the app's own mappers
 ```
 
 `db-verify.ts` is the meaningful one: it imports `src/lib/sync.ts` so it tests

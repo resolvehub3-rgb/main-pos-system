@@ -3,7 +3,10 @@
  *
  * WHY THIS EXISTS
  * ---------------
- * `POST /api/download` in `verified_account` mode must grant the installer
+ * STATUS: retained as reusable server-side plumbing. The `POST /api/download`
+ * endpoint that first needed it has been removed — SamTill ships as a
+ * browser-installed PWA, not an installer download. It originally existed so
+ * that a `verified_account`-style gate could grant the installer
  * only to customers whose email address has actually been confirmed. A
  * locally-verified access token proves WHO the caller is — it does not, by
  * itself, prove the address was confirmed (a project with "Confirm email"

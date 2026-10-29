@@ -2,7 +2,7 @@
  * Commerce preview — CLIENT-SIDE DISPLAY SWITCHES ONLY.
  *
  * These flags control what the marketing site *shows*. They cannot turn on
- * real payments or downloads: the serverless API independently refuses to
+ * real payments: the serverless API independently refuses to
  * work until the commerce backend is provisioned (503 commerce_not_configured)
  * and until the operator sets CHECKOUT_ENABLED=true / PUBLISH_PRICES=true
  * server-side (see landing/docs/03-environment-variables.md).
@@ -22,7 +22,4 @@ export const COMMERCE = {
 
   /** Online payment (Paystack, test mode during preparation). */
   paymentsEnabled: false,
-
-  /** Installer download entitlements for subscribers. */
-  downloadEnabled: false,
 } as const;

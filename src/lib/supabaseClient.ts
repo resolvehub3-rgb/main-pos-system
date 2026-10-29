@@ -47,21 +47,38 @@ import {
   bindMirrorId,
 } from './sync.ts';
 import { adoptCategory, adoptCustomer, adoptProduct, adoptSale } from './mirrorRows.ts';
+import {
+  signInWithSupabase,
+  signOutSupabase,
+  resolveAuthUser,
+  signUpAndProvisionShop,
+  ensureOwnerShop,
+  type SupabaseAuthClient,
+} from './authProvider.ts';
 
-// Environment variables for real Supabase deployment
-const getEnvVar = (key: string): string => {
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
-    return import.meta.env[key];
-  }
-  return '';
-};
+// Environment variables for real Supabase deployment.
+//
+// IMPORTANT: these use STATIC `import.meta.env.VITE_X` member access on
+// purpose. The previous helper read `import.meta.env[key]` (dynamic access),
+// which forces Vite to inline the ENTIRE env object — every `VITE_*` var
+// present in `.env`, including ones this code never references. That is how
+// the super-admin credential stayed in the bundle even after its last code
+// reference was deleted. Static access lets Vite's build-time replacement
+// inline ONLY the vars written here, so an unrelated secret in `.env` can
+// never be shipped. Keep every env read in this app statically referenced.
+// The `?.` is required as well: under `tsx`/Node (the test runner) and in any
+// non-Vite context `import.meta.env` is undefined, so a bare
+// `import.meta.env.VITE_X` would throw at module load. Optional chaining is
+// still a STATIC member access, so Vite replaces only this var at build time —
+// it does not re-inline the whole env object.
+const ENV_SUPABASE_URL: string = import.meta.env?.VITE_SUPABASE_URL ?? '';
+const ENV_SUPABASE_ANON_KEY: string = import.meta.env?.VITE_SUPABASE_ANON_KEY ?? '';
 
-const ENV_SUPABASE_URL = getEnvVar('VITE_SUPABASE_URL');
-const ENV_SUPABASE_ANON_KEY = getEnvVar('VITE_SUPABASE_ANON_KEY');
-
-// First super-admin bootstrap credentials (see docs/DEPLOYMENT.md)
-const ENV_SUPER_ADMIN_EMAIL = getEnvVar('VITE_SUPER_ADMIN_EMAIL');
-const ENV_SUPER_ADMIN_PASSWORD = getEnvVar('VITE_SUPER_ADMIN_PASSWORD');
+// NOTE: There is intentionally NO VITE_SUPER_ADMIN_EMAIL / VITE_SUPER_ADMIN_
+// PASSWORD here. VITE_ variables are compile-time inlined into the public web
+// bundle, so any secret in one is shipped to every visitor. The first super
+// admin is provisioned once via the Supabase Admin
+// API (server-side, service-role key) — never from client build config.
 
 // Storage keys for real persistent data and user auth session
 const STORAGE_KEY_CONFIG = 'samtech_supabase_config';
@@ -118,55 +135,11 @@ class DatabaseService {
     // Let the sync layer resolve a row's tenant when it queues a child write,
     // so the tenant is always acknowledged before the row that references it.
     setTenantLookup((id) => this.tenants.find((t) => t.id === id));
-    this.bootstrapSuperAdmin();
-  }
-
-  /**
-   * First super-admin bootstrap.
-   *
-   * When VITE_SUPER_ADMIN_EMAIL and VITE_SUPER_ADMIN_PASSWORD are configured,
-   * the account is guaranteed to exist as role 'super_admin' on every start:
-   * it is created if missing, otherwise promoted and its password synced so the
-   * documented credentials always work. Never throws — the app must always start.
-   */
-  private bootstrapSuperAdmin(): void {
-    try {
-      const email = ENV_SUPER_ADMIN_EMAIL.trim().toLowerCase();
-      const password = ENV_SUPER_ADMIN_PASSWORD;
-      if (!email || !password) return;
-
-      const existing = this.users.find((u) => u.email.trim().toLowerCase() === email);
-
-      if (!existing) {
-        this.addUser({
-          email,
-          password,
-          full_name: 'Super Administrator',
-          phone: '',
-          role: 'super_admin',
-          is_active: true,
-        });
-        return;
-      }
-
-      const needsPromotion = existing.role !== 'super_admin';
-      const needsPassword = existing.password !== password;
-      const needsActivation = !existing.is_active;
-      if (!needsPromotion && !needsPassword && !needsActivation) return;
-
-      existing.role = 'super_admin';
-      existing.password = password;
-      existing.is_active = true;
-      if (this.supabaseClient) {
-        // Sync the whole row so a super-admin who has never landed in Supabase
-        // is created too (an UPDATE alone matches no rows and silently does
-        // nothing). Upsert is idempotent, so re-running is safe.
-        syncUser(this.supabaseClient, existing);
-      }
-      this.notify();
-    } catch (err) {
-      console.warn('Super admin bootstrap skipped:', err);
-    }
+    // NOTE: no super-admin bootstrap here. It used to create/promote a
+    // super_admin account from credentials baked into the client bundle on
+    // every start — which both leaked the credential to every install and let
+    // the client mint a privileged role. The first super admin is now
+    // provisioned once via the Supabase Admin API (see docs/SECURITY.md).
   }
 
   private loadState() {
@@ -308,8 +281,42 @@ class DatabaseService {
     }
 
     try {
-      this.supabaseClient = createClient(this.config.url, this.config.anonKey);
-      
+      // Auth is enabled here for the FIRST time in this app's life. The client
+      // persists its session in localStorage under the default `sb-<ref>-auth`
+      // key so a previously authenticated till can restore its session after a
+      // reload or a network outage (see docs/SECURITY.md §3). `autoRefreshToken`
+      // keeps the access token fresh while online; when offline the persisted
+      // session is reused and the sync queue simply waits.
+      this.supabaseClient = createClient(this.config.url, this.config.anonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          storageKey: 'sb-pos-auth',
+          detectSessionInUrl: false,
+        },
+      });
+
+      // Re-apply the sign-in model on every Supabase session transition. This is
+      // how token refresh, expiry, password recovery and a revoked session are
+      // all handled in one place:
+      //   • TOKEN_REFRESHED / SIGNED_IN  → the session is good; if we have no
+      //     local user yet, resolve it from auth.uid() so a reload restores the
+      //     signed-in state without asking for the password again.
+      //   • SIGNED_OUT                   → the session is gone (explicit logout,
+      //     expiry, or the server revoked it). We clear the in-memory user so no
+      //     protected ONLINE operation proceeds. Local data and queued sales are
+      //     NEVER discarded here — a revoked session stops online access, it does
+      //     not delete the shop's history.
+      //   • PASSWORD_RECOVERY            → surfaced via statusMessage so the UI
+      //     can route the owner to choose a new password.
+      try {
+        this.supabaseClient.auth.onAuthStateChange((event, session) => {
+          this.handleAuthStateChange(event, session);
+        });
+      } catch (authErr) {
+        console.warn('Supabase Auth subscription note:', authErr);
+      }
+
       // Setup Realtime Subscription Channel on public tables
       try {
         if (this.realtimeChannel) {
@@ -358,6 +365,108 @@ class DatabaseService {
       this.config.statusMessage = `Connection error: ${err instanceof Error ? err.message : String(err)}`;
       this.notify();
       return false;
+    }
+  }
+
+  /**
+   * React to Supabase Auth session transitions.
+   *
+   * This is the single place the app reconciles its locally-persisted user with
+   * the authoritative Supabase session:
+   *
+   *  • SIGNED_IN / TOKEN_REFRESHED — the online session is valid. If we have no
+   *    local user yet (a reload on a previously signed-in device, or the first
+   *    sign-in on this till), resolve the application user from `auth.uid()` so
+   *    the correct role and shop are restored WITHOUT re-prompting for a
+   *    password. If a user is already loaded we leave it alone — the roster row
+   *    is not re-read on every token refresh.
+   *
+   *  • SIGNED_OUT — the session ended: an explicit sign-out, an expiry the
+   *    refresh token could not renew, or the server revoking access. We clear
+   *    the in-memory user so no protected ONLINE operation can proceed under a
+   *    dead session. Crucially, local data and the queued-sales outbox are NOT
+   *    discarded: a revoked session stops online access, it never deletes the
+   *    shop's history or silently drops a completed sale.
+   *
+   *  • PASSWORD_RECOVERY — surfaced through statusMessage so the UI can route
+   *    the owner to set a new password.
+   *
+   * The locally cached role is never treated as authorization for an ONLINE
+   * operation: every Supabase request carries the live session JWT and RLS
+   * re-derives the role from `auth.uid()` server-side. Clearing the user here
+   * only governs what the client is willing to attempt.
+   */
+  private handleAuthStateChange(
+    event: string,
+    session: { user?: { id: string; email?: string } } | null
+  ): void {
+    switch (event) {
+      case 'INITIAL_SESSION':
+      case 'SIGNED_IN':
+      case 'TOKEN_REFRESHED': {
+        // Restore the application user only when one is not already loaded, so
+        // a token refresh does not clobber an active in-memory session.
+        if (!this.currentUser && session?.user) {
+          void this.restoreUserFromSession(session.user);
+        }
+        break;
+      }
+      case 'SIGNED_OUT': {
+        if (this.currentUser) {
+          // Clear the user but keep local data + the sync queue intact.
+          this.setCurrentUser(null);
+          this.config.statusMessage = 'Signed out. Local data is preserved; sign in to resume syncing.';
+          this.notify();
+        }
+        break;
+      }
+      case 'PASSWORD_RECOVERY': {
+        this.config.statusMessage = 'Password recovery started — choose a new password to continue.';
+        this.notify();
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  /**
+   * Rebuild the application user from the live Supabase session at startup or
+   * after a token refresh, without asking for a password again.
+   *
+   * Runs under the caller's own RLS scope, so it can only ever resolve the
+   * identity the session actually belongs to. Any refusal (missing profile, no
+   * active membership, deactivated account) clears the local user rather than
+   * granting access.
+   */
+  private async restoreUserFromSession(sessionUser: { id: string; email?: string }): Promise<void> {
+    const client = this.supabaseClient;
+    if (!client) return;
+    try {
+      const result = await resolveAuthUser(client, sessionUser);
+      if (!result.ok) {
+        // The session exists but the application identity is not usable — do
+        // not keep a half-resolved user around for protected operations.
+        console.warn(`Session restore refused (${result.code}): ${result.message}`);
+        this.setCurrentUser(null);
+        return;
+      }
+      const user = result.user;
+      bindMirrorId(user.id);
+      if (user.tenant_id) {
+        bindMirrorId(user.tenant_id);
+        await this.adoptRemoteShop(user.tenant_id);
+        await this.adoptRemoteCatalogue(user.tenant_id);
+      }
+      const existing = this.users.find((u) => u.id === user.id);
+      if (existing) {
+        Object.assign(existing, user);
+      } else {
+        this.users.unshift(user);
+      }
+      this.setCurrentUser(user);
+    } catch (err) {
+      console.warn('Session restore skipped:', err);
     }
   }
 
@@ -1533,8 +1642,19 @@ class DatabaseService {
   }
 
   public addUser(user: Omit<UserAccount, 'id' | 'created_at'>): UserAccount {
+    // A privileged role may only be minted by an authenticated super admin.
+    // Client-supplied roles are not trusted: if a non-super-admin session (or a
+    // tampered client) asks to create a `super_admin`, the role is coerced down
+    // to `shop_owner`. This is the only place a super admin can be created in
+    // the app, and the Super Admin Dashboard runs under a super-admin session,
+    // so that flow keeps working while self-escalation is closed.
+    const wantsPrivileged = user.role === 'super_admin';
+    const mayGrantPrivileged = this.currentUser?.role === 'super_admin';
+    const role: UserRole = wantsPrivileged && !mayGrantPrivileged ? 'shop_owner' : user.role;
+
     const newUser: UserAccount = {
       ...user,
+      role,
       // Random suffix: two staff saved inside the same millisecond would
       // otherwise share an id, and Delete/Disable would hit the wrong row.
       id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -1613,56 +1733,116 @@ class DatabaseService {
   }
 
   /**
-   * Start a session for an identifier this device knows — or, failing that,
-   * one the mirror holds.
+   * Sign a user in and start their session.
    *
-   * Local is checked first: it is the source of truth for this device and the
-   * fast path for every till that has already seen the person. Only when the
-   * account is absent here do we read from Supabase.
+   * The method now has two mutually exclusive paths, decided by whether a
+   * Supabase client is configured:
    *
-   * That read is the one deliberate exception to this app's one-way mirror,
-   * and it exists for a concrete reason: an account created on the owner's
-   * machine is written to the mirror but never sent anywhere else — the app
-   * does not subscribe to inserts — so without this lookup a cashier could
-   * only ever sign in on the machine that created them. Their shop comes with
-   * them for the same reason: a till with nowhere to open is not signed in.
+   *  ONLINE (a Supabase client exists). Supabase Auth is the ONLY credential
+   *  check. The password is sent to `auth.signInWithPassword` and is never
+   *  compared, stored, or mirrored by this app. The application identity is
+   *  then resolved from `auth.uid()` (profiles + memberships + roster), so the
+   *  role shown and the shop opened are whatever the server authorises — never
+   *  something the client asserts. Sign-in requires the account's EMAIL,
+   *  because Supabase Auth identifies users by email; a phone or staff name is
+   *  refused here with a clear message (those remain a device-local convenience
+   *  on an offline till). A NEW sign-in therefore needs the network — you
+   *  cannot verify a password offline. A user who already signed in keeps their
+   *  persisted session and keeps selling through an outage without re-prompting.
    *
-   * A row found remotely is adopted, not copied back. Its ids are registered
-   * so realtime events for it resolve here, and it is stored *without* being
-   * re-pushed — the mirror already holds it. Every later attempt on this
-   * device is local again.
+   *  DEVICE-LOCAL (no Supabase client). This is the offline / not-yet-connected
+   *  mode and the test harness. It matches an identifier the device already
+   *  holds and compares against the locally stored credential. It is a real
+   *  fallback, not a security boundary: it only ever grants access to data that
+   *  is already on this device, and it is the path that keeps a pure-offline
+   *  shop working. Once a client is configured, this path is unreachable.
    */
   public async login(
     identifier: string,
     password?: string
   ): Promise<{ success: boolean; user?: UserAccount; message?: string }> {
+    // ---- ONLINE PATH: Supabase Auth is authoritative ----
+    if (this.supabaseClient) {
+      const client = this.supabaseClient;
+      const email = identifier.trim();
+
+      // Supabase Auth signs in by email. A phone or staff-name identifier
+      // cannot be resolved to an Auth user without a pre-authentication lookup,
+      // which the RLS lockdown deliberately denies (and which would be an
+      // account-enumeration surface). So online sign-in asks for the email.
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return {
+          success: false,
+          message:
+            'Online sign-in uses your registered email address. Enter the email your shop owner invited.',
+        };
+      }
+
+      const signedIn = await signInWithSupabase(client, email, password ?? '');
+      if (!signedIn.ok) {
+        return { success: false, message: signedIn.message };
+      }
+
+      // Resolve the application user from auth.uid(): authoritative role from
+      // profiles, active-tenant proof from memberships, app fields + is_active
+      // from the roster. A missing/inactive/unprovisioned identity is refused.
+      let resolved = await resolveAuthUser(client, signedIn.user);
+      if (!resolved.ok && (resolved.code === 'no_membership' || resolved.code === 'no_profile')) {
+        // Post-email-confirmation completion. A shop owner who signed up (which
+        // stored their shop details in the Auth metadata) but could not run the
+        // provisioning RPC during signUp — because confirmation was required and
+        // no session existed yet — arrives here on their FIRST confirmed sign-in
+        // with a profile but no shop. Finish it now via the trusted RPC. The RPC
+        // is idempotent (returns the existing tenant if one is already owned) and
+        // pins the role to shop_owner, so this can never mint a super admin.
+        const meta = signedIn.user.user_metadata;
+        const shopName = typeof meta?.shop_name === 'string' ? meta.shop_name : '';
+        if (shopName) {
+          const provisioned = await ensureOwnerShop(client, {
+            shopName,
+            shopAddress: typeof meta?.shop_address === 'string' ? meta.shop_address : undefined,
+            fullName: typeof meta?.full_name === 'string' ? meta.full_name : signedIn.user.email ?? '',
+            phone: typeof meta?.phone === 'string' ? meta.phone : '',
+          });
+          if (provisioned.ok) {
+            resolved = await resolveAuthUser(client, signedIn.user);
+          }
+        }
+      }
+      if (!resolved.ok) {
+        return { success: false, message: resolved.message };
+      }
+      const user = resolved.user;
+
+      // Register ids before adopting the shop so realtime events resolve here,
+      // then pull the shop + catalogue onto a till that has never seen them —
+      // now scoped by the caller's own RLS session, not an anonymous key.
+      bindMirrorId(user.id);
+      if (user.tenant_id) {
+        bindMirrorId(user.tenant_id);
+        await this.adoptRemoteShop(user.tenant_id);
+        await this.adoptRemoteCatalogue(user.tenant_id);
+      }
+
+      const existing = this.users.find((u) => u.id === user.id);
+      if (existing) {
+        Object.assign(existing, user);
+        this.setCurrentUser(existing);
+        return { success: true, user: existing };
+      }
+      this.users.unshift(user);
+      this.setCurrentUser(user);
+      return { success: true, user };
+    }
+
+    // ---- DEVICE-LOCAL PATH: offline / no Supabase configured ----
     const cleanId = identifier.trim().toLowerCase();
     const matches = (u: UserAccount) =>
       u.email.toLowerCase() === cleanId ||
       u.phone.replace(/[\s+-]/g, '') === cleanId.replace(/[\s+-]/g, '') ||
       u.full_name.toLowerCase() === cleanId;
 
-    let user: UserAccount | undefined = this.users.find(matches);
-
-    if (!user && this.supabaseClient) {
-      const remote = await this.lookupRemoteUser(identifier);
-      if (remote) {
-        // Register before anything else touches these ids: the mirror keys
-        // rows by its own UUID, and a realtime DELETE or status change from
-        // another till has to resolve to the row adopted below.
-        bindMirrorId(remote.id);
-        bindMirrorId(remote.tenant_id);
-        await this.adoptRemoteShop(remote.tenant_id);
-        await this.adoptRemoteCatalogue(remote.tenant_id);
-
-        user = this.users.find((u) => u.id === remote.id);
-        if (!user) {
-          this.users.unshift(remote);
-          user = remote;
-        }
-        this.notify();
-      }
-    }
+    const user: UserAccount | undefined = this.users.find(matches);
 
     if (!user) {
       return { success: false, message: 'Account not found. Please verify your email or register.' };
@@ -1672,51 +1852,27 @@ class DatabaseService {
       return { success: false, message: 'This account has been deactivated. Please contact your administrator.' };
     }
 
-    // Enforce the password whenever the account has one (e.g. created by the shop owner).
-    if (user.password && (!password || password !== user.password)) {
+    // A stored sign-in credential is required. An account WITHOUT one cannot
+    // be authenticated by password — previously `if (user.password && …)`
+    // short-circuited and let anyone in just by knowing the email, so a row
+    // synced without a password was an open door. We now refuse instead.
+    //
+    // This local compare exists ONLY for the device-local path above. It is not
+    // a replacement for real hashing: when a Supabase client is configured this
+    // branch is unreachable and password verification happens server-side in
+    // Supabase Auth (see docs/SECURITY.md).
+    if (!user.password) {
+      return {
+        success: false,
+        message: 'This account has no sign-in credential yet. Ask your shop owner to re-issue access.',
+      };
+    }
+    if (!password || password !== user.password) {
       return { success: false, message: 'Incorrect password. Please verify and try again.' };
     }
 
     this.setCurrentUser(user);
     return { success: true, user };
-  }
-
-  /**
-   * Find an account in the mirror using the same identifiers {@link login}
-   * accepts locally.
-   *
-   * Each probe is a narrow single-row read, and the first hit stops the chain:
-   * a device that has never seen this shop learns about exactly one account
-   * and its shop, never the roster — least of all everyone else's password.
-   */
-  private async lookupRemoteUser(raw: string): Promise<UserAccount | null> {
-    const client = this.supabaseClient;
-    if (!client) return null;
-
-    const asTyped = raw.trim();
-    const probes: Array<{ column: 'email' | 'phone' | 'full_name'; value: string; pattern: boolean }> = [
-      { column: 'email', value: asTyped.toLowerCase(), pattern: false },
-      { column: 'phone', value: asTyped, pattern: false },
-      // `ilike` so the name matches case-insensitively as the local lookup
-      // does; `%` and `_` are escaped so they stay literal text.
-      { column: 'full_name', value: asTyped.replace(/[\\%_]/g, (m) => `\\${m}`), pattern: true },
-    ];
-
-    for (const probe of probes) {
-      const query = client.from('users').select('*').limit(1);
-      const { data, error } = probe.pattern
-        ? await query.ilike(probe.column, probe.value)
-        : await query.eq(probe.column, probe.value);
-
-      if (error) {
-        console.warn(`Remote sign-in lookup failed on ${probe.column}:`, error.message);
-        return null;
-      }
-      const row = (data ?? [])[0] as UserAccount | undefined;
-      if (row) return row;
-    }
-
-    return null;
   }
 
   /**
@@ -1835,6 +1991,24 @@ class DatabaseService {
     }
   }
 
+  /**
+   * DEVICE-LOCAL registration.
+   *
+   * This is the offline / no-Supabase path (and the test harness). It creates a
+   * shop and an account that live ONLY on this device so a pure-offline till can
+   * open and trade. It deliberately does NOT push anything to the mirror: when a
+   * Supabase client is configured, a new shop and its owner are provisioned by a
+   * trusted server-side SECURITY DEFINER RPC (see {@link registerOnline}), never
+   * by a direct client insert of a tenant/profile/membership row.
+   *
+   * Because it never syncs, this path is safe to keep: it grants access to data
+   * that is already on this device and nothing more. Online sign-in still
+   * requires Supabase Auth (see {@link login}), so a locally-registered account
+   * is not a back door to any remote data.
+   *
+   * A self-service signup can never mint a privileged role: a request for
+   * `super_admin` is coerced to `shop_owner`.
+   */
   public register(data: {
     full_name: string;
     email: string;
@@ -1852,12 +2026,17 @@ class DatabaseService {
       return { success: false, message: 'An account with this email address already exists. Please log in.' };
     }
 
-    const assignedRole: UserRole = data.role || 'shop_owner';
+    const requestedRole: UserRole = data.role || 'shop_owner';
+    const assignedRole: UserRole = requestedRole === 'super_admin' ? 'shop_owner' : requestedRole;
     let tenantId = data.tenant_id;
     let shopName = data.shop_name;
 
     if (assignedRole === 'shop_owner') {
-      const newTenant = this.addTenant({
+      // Local-only tenant + main branch. No syncTenant()/syncBranch() here —
+      // that is the whole point: the mirror is written by the provisioning RPC,
+      // not by this client.
+      const newTenant: Tenant = {
+        ...data,
         name: data.shop_name || `${data.full_name}'s Supermarket`,
         slug:
           (data.shop_name || data.full_name)
@@ -1870,7 +2049,20 @@ class DatabaseService {
         currency: 'GHS',
         is_active: true,
         subscription_status: 'active',
-      });
+        id: `tenant-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        created_at: new Date().toISOString(),
+      } as Tenant;
+      this.tenants.push(newTenant);
+      this.branches.push({
+        id: `branch-${newTenant.id}-main`,
+        tenant_id: newTenant.id,
+        name: `${newTenant.name} Main Branch`,
+        code: 'MAIN',
+        address: newTenant.address,
+        phone: newTenant.phone,
+        is_main: true,
+        is_active: true,
+      } as Branch);
       tenantId = newTenant.id;
       shopName = newTenant.name;
     }
@@ -1890,15 +2082,121 @@ class DatabaseService {
     };
 
     this.users.unshift(newUser);
-    if (this.supabaseClient) {
-      syncUser(this.supabaseClient, newUser);
+    // No syncUser(): the online account is created by Supabase Auth + the
+    // provisioning RPC, never by mirroring a plaintext-credential row here.
+    this.setCurrentUser(newUser);
+    return { success: true, user: newUser };
+  }
+
+  /**
+   * ONLINE registration for a connected till: create the owner + shop through
+   * trusted server-side calls only.
+   *
+   * This never inserts a tenant, profile or membership row from the client. It:
+   *   1. Calls `auth.signUp` — Supabase hashes the password server-side; it is
+   *      never stored or mirrored by this app.
+   *   2. Calls the SECURITY DEFINER RPC `create_tenant_with_owner`, which runs
+   *      inside the database, keys everything to `auth.uid()`, pins the role to
+   *      `shop_owner`, and cannot mint a super admin.
+   *
+   * If the project requires email confirmation, signUp returns no session and
+   * the RPC cannot run yet; we tell the owner to confirm, and the shop is
+   * finished on their first confirmed sign-in (see {@link login}). On a
+   * successful synchronous provisioning we build the local device record from
+   * the server-returned tenant id so the till can open immediately.
+   */
+  public async registerOnline(data: {
+    full_name: string;
+    email: string;
+    phone: string;
+    password: string;
+    shop_name: string;
+    shop_address?: string;
+  }): Promise<{ success: boolean; user?: UserAccount; message?: string; pendingConfirmation?: boolean }> {
+    const client = this.supabaseClient;
+    if (!client) {
+      // No client configured — fall back to the device-local path.
+      return this.register(data);
+    }
+
+    const cleanEmail = data.email.trim().toLowerCase();
+    const existing = this.users.find((u) => u.email.toLowerCase() === cleanEmail);
+    if (existing) {
+      return { success: false, message: 'An account with this email address already exists. Please log in.' };
+    }
+
+    const provisioned = await signUpAndProvisionShop(client as SupabaseAuthClient, {
+      email: cleanEmail,
+      password: data.password,
+      shopName: data.shop_name,
+      shopAddress: data.shop_address,
+      fullName: data.full_name.trim(),
+      phone: data.phone.trim(),
+    });
+
+    if (!provisioned.ok) {
+      return {
+        success: false,
+        message: provisioned.message,
+        pendingConfirmation: provisioned.needsEmailConfirmation,
+      };
+    }
+
+    // Provisioning succeeded server-side. Build the local device record using
+    // the SERVER's tenant id (a UUID) so this till opens in the owner's shop.
+    const tenantId = provisioned.tenantId;
+    bindMirrorId(tenantId);
+    const tenantName = data.shop_name || `${data.full_name}'s Supermarket`;
+
+    if (!this.tenants.some((t) => t.id === tenantId)) {
+      this.tenants.push({
+        id: tenantId,
+        name: tenantName,
+        slug: tenantName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'new-shop',
+        phone: data.phone,
+        email: cleanEmail,
+        address: data.shop_address || 'Greater Accra, Ghana',
+        currency: 'GHS',
+        is_active: true,
+        subscription_status: 'trial',
+        created_at: new Date().toISOString(),
+      } as Tenant);
+    }
+
+    const newUser: UserAccount = {
+      id: provisioned.authUser.id,
+      full_name: data.full_name.trim(),
+      email: cleanEmail,
+      phone: data.phone.trim(),
+      role: 'shop_owner',
+      tenant_id: tenantId,
+      shop_name: tenantName,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    };
+    bindMirrorId(newUser.id);
+    if (!this.users.some((u) => u.id === newUser.id)) {
+      this.users.unshift(newUser);
     }
     this.setCurrentUser(newUser);
     return { success: true, user: newUser };
   }
 
-  public logout(): void {
+  /**
+   * End the session both locally and in Supabase Auth.
+   *
+   * The Supabase sign-out is awaited so the server-side session/refresh token
+   * is invalidated too, not just this device's view. A failure there is
+   * swallowed (see signOutSupabase) so a network error can never strand the
+   * user half-logged-out: the local user is always cleared regardless. Local
+   * data and the sync queue are untouched — signing out stops access, it does
+   * not delete the shop's history.
+   */
+  public async logout(): Promise<void> {
     this.setCurrentUser(null);
+    if (this.supabaseClient) {
+      await signOutSupabase(this.supabaseClient as SupabaseAuthClient);
+    }
   }
 
   // Reset to clean empty baseline

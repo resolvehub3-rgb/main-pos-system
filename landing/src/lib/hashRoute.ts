@@ -4,7 +4,7 @@
  * The marketing site is a static single-page build with no server rewrites,
  * so account screens live behind hash routes: `#/register`, `#/login`,
  * `#/verify`, `#/forgot-password`, `#/reset-password`, `#/account`,
- * `#/download`, `#/checkout`. Anything that does not start with `#/` (e.g.
+ * `#/checkout`. Anything that does not start with `#/` (e.g.
  * the section anchors `#features`, `#contact`) is NOT a route and keeps its
  * normal scroll behaviour.
  *
@@ -22,7 +22,6 @@ export const ACCOUNT_ROUTES = [
   '/forgot-password',
   '/reset-password',
   '/account',
-  '/download',
   '/checkout',
 ] as const;
 
@@ -98,7 +97,6 @@ export function verificationParams(params: URLSearchParams): VerificationParams 
 /** Route to send the customer to after signing in (default: account page). */
 export function nextRouteAfterSignIn(params: URLSearchParams): AccountRoute {
   const next = params.get('next');
-  if (next === 'download') return '/download';
   if (next === 'register') return '/register';
   if (next === 'checkout') return '/checkout';
   return '/account';

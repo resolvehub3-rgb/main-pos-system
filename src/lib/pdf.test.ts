@@ -73,10 +73,9 @@ test('print html includes title, meta, table, footer', () => {
   assert.ok(html.includes('display: table-header-group'))
 })
 
-test('print html carries no inline script (the popup inherits our CSP)', () => {
-  // The report popup inherits `script-src 'self'`, so an inline <script>
-  // would be blocked in the desktop app; printReport() triggers print from
-  // the opener instead.
+test('print html carries no inline script (the popup may inherit a strict CSP)', () => {
+  // A popup inheriting `script-src 'self'` would block an inline <script>;
+  // printReport() triggers print from the opener instead.
   const html = buildPrintHtml({
     title: 'My Report',
     metadata: [],

@@ -2,19 +2,27 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import {CustomerDisplayWindow} from './components/CustomerDisplayWindow.tsx';
 import {SplashScreen} from './components/SplashScreen.tsx';
+import {initInstallPrompt, registerServiceWorker} from './lib/pwa.ts';
 import './index.css';
 
 /**
- * The desktop app's customer display window loads `/?view=customer-display`
- * (set by the Electron main process) and renders only the customer-facing
- * root. Everything else — including the browser/PWA entry point — is the
- * existing App exactly as before.
+ * The customer display popup window loads `/?view=customer-display` (opened
+ * by the cashier's "Customer Display" button) and renders only the
+ * customer-facing root. Everything else — including the normal PWA entry
+ * point — is the existing App exactly as before.
  *
  * The main entry opens with the branded splash screen, which fades out to
  * reveal either the login tab (no session) or the dashboard (session already
  * restored). The customer display never shows a splash — it must come up
  * straight onto the customer-facing view.
+ *
+ * PWA plumbing: the service worker is registered once (production only) and
+ * the browser install prompt is captured so the header can offer a real
+ * "Install app" button (src/lib/pwa.ts).
  */
+registerServiceWorker();
+initInstallPrompt();
+
 const isCustomerDisplayView =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).get('view') === 'customer-display';

@@ -462,7 +462,7 @@ test('the widest remaining window wins when several rows exist', () => {
   assertEqual(decision.validTo, WINDOW.valid_to);
 });
 
-test('deny reasons map to download_events.result values', () => {
+test('deny reasons map to audit result values', () => {
   assertEqual(toDownloadEventResult({allowed: true, reason: 'granted'}), 'granted');
   assertEqual(toDownloadEventResult({allowed: false, reason: 'no_entitlement'}), 'denied_no_entitlement');
   assertEqual(toDownloadEventResult({allowed: false, reason: 'expired'}), 'denied_expired');

@@ -1,6 +1,6 @@
 -- =============================================================================
 -- SamTill commerce — schema migration 0001 (customer accounts, orders,
--- subscriptions, entitlements, installer releases, downloads, webhooks, audit)
+-- subscriptions, entitlements, webhooks, audit)
 -- =============================================================================
 --
 -- STATUS: PREPARED FOR REVIEW ONLY — THIS FILE HAS NOT BEEN EXECUTED.
@@ -21,10 +21,7 @@
 --      audit records — happen server-side inside Vercel functions using the
 --      service-role key (bypasses RLS). The service-role key never ships to
 --      the browser.
---   3. The Windows installer lives in a PRIVATE storage bucket. No policy
---      grants anon/authenticated any access to storage.objects, so listing
---      or reading installer objects is impossible without the service role.
---   4. No prices are seeded. Plan rows are inserted only after the owner
+--   3. No prices are seeded. Plan rows are inserted only after the owner
 --      approves commercial terms (landing/docs/01-commercial-decisions.md).
 --
 -- CONVENTIONS
@@ -207,7 +204,7 @@ create table public.plans (
                       check (billing_type in ('one_time', 'recurring')),
   -- Months of access a successful payment grants. Drives entitlement.valid_to
   -- in the shared event reducer (api/_lib/event-reducer.ts), so a one-time
-  -- purchase of 6 grants downloads/updates for six months.
+  -- purchase of 6 grants six months of access.
   interval_months     int not null check (interval_months between 1 and 60),
   entitlement_product text not null default 'samtill-pos',
   -- Populated only if/when Paystack plan-based auto-renewal is approved.
@@ -310,7 +307,7 @@ create table public.subscriptions (
 
 comment on table public.subscriptions is
   'Billing lifecycle. status=attention means a renewal charge failed: access '
-  'continues until the entitlement valid_to, then download access stops.';
+  'continues until the entitlement valid_to, then access stops.';
 
 create trigger subscriptions_set_updated_at
   before update on public.subscriptions
@@ -349,7 +346,6 @@ create trigger entitlements_set_updated_at
   before update on public.entitlements
   for each row execute function public.set_updated_at();
 
--- The download endpoint queries exactly this shape.
 create index entitlements_user_product_idx
   on public.entitlements (user_id, product_code, status);
 
@@ -358,107 +354,7 @@ alter table public.entitlements enable row level security;
 
 
 -- -----------------------------------------------------------------------------
--- 8. installer_releases — version registry for the private bucket
---
--- The installer itself is NEVER stored in Git. It is uploaded to the private
--- 'installers' bucket by the owner (dashboard or CLI using the service-role
--- key), and the row below records the expected integrity metadata.
--- -----------------------------------------------------------------------------
-
-create table public.installer_releases (
-  id            uuid primary key default gen_random_uuid(),
-  product_code  text not null default 'samtill-pos',
-  version       text not null
-                check (version ~ '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'),
-  filename      text not null check (filename ~* '^[A-Za-z0-9._-]+\.exe$'),
-  -- Object key inside the private bucket, e.g. pos/1.0.0/SamTill-POS-Setup.exe
-  storage_path  text not null unique
-                check (storage_path ~ '^[A-Za-z0-9][A-Za-z0-9._/-]*\.exe$'
-                       and storage_path !~ '\.\.'),
-  sha256        text not null check (sha256 ~ '^[0-9A-Fa-f]{64}$'),
-  size_bytes    bigint not null check (size_bytes > 0),
-  min_os        text,
-  release_notes text,
-  is_active     boolean not null default false,
-  published_at  timestamptz,
-  created_at    timestamptz not null default now(),
-  constraint releases_active_requires_published_at
-    check (not is_active or published_at is not null)
-);
-
-comment on table public.installer_releases is
-  'Installer registry. A row becomes downloadable only when is_active=true, '
-  'which requires the file to be uploaded and its SHA-256 re-verified.';
-
-create index installer_releases_active_idx
-  on public.installer_releases (product_code, published_at desc)
-  where is_active;
-
-alter table public.installer_releases enable row level security;
--- No policies: service role only. Clients learn about releases exclusively
--- through an authorised /api/download response.
-
--- Known release metadata, recorded for later integrity verification.
--- INACTIVE on purpose: is_active stays false until the file is uploaded to
--- the private bucket and its SHA-256 re-checked against this value.
---
---   file:     SamTill-POS-Setup.exe
---   version:  1.0.0
---   size:     125267865 bytes (119.46 MB)
---   sha256:   C0694FCB7FEED8E21EF18C5D21CEE8392CF683F6671131E258BC3BC3EF97FF07
---   status:   unsigned binary (no code-signing certificate) — see
---             landing/docs/04-installer-delivery-and-licensing.md
-insert into public.installer_releases
-  (product_code, version, filename, storage_path, sha256, size_bytes,
-   min_os, release_notes, is_active, published_at)
-values
-  ('samtill-pos', '1.0.0', 'SamTill-POS-Setup.exe',
-   'pos/1.0.0/SamTill-POS-Setup.exe',
-   'C0694FCB7FEED8E21EF18C5D21CEE8392CF683F6671131E258BC3BC3EF97FF07',
-   125267865,
-   'Windows 10/11 x64',
-   'Initial release. Unsigned binary — Windows SmartScreen may warn.',
-   false, null);
-
-
--- -----------------------------------------------------------------------------
--- 9. download_events — authorised-download audit trail
--- -----------------------------------------------------------------------------
-
-create table public.download_events (
-  id              uuid primary key default gen_random_uuid(),
-  user_id         uuid not null references auth.users (id) on delete cascade,
-  release_id      uuid not null references public.installer_releases (id),
-  granted_at      timestamptz not null default now(),
-  link_expires_at timestamptz not null,
-  -- SHA-256 of "<AUDIT_HASH_SALT>:<client ip>"; null when no salt is set.
-  ip_hash         text check (ip_hash is null or ip_hash ~ '^[0-9a-f]{64}$'),
-  user_agent      text check (user_agent is null or char_length(user_agent) <= 300),
-  result          text not null check (result in
-                   ('granted',
-                    'denied_no_entitlement',
-                    'denied_wrong_product',
-                    'denied_not_yet_active',
-                    'denied_expired',
-                    'denied_inactive',
-                    'denied_no_release',
-                    'denied_rate_limited',
-                    'denied_unverified_email'))
-);
-
-comment on table public.download_events is
-  'One row per authorised or refused installer download attempt. Retention: '
-  '12 months.';
-
-create index download_events_user_idx on public.download_events (user_id, granted_at desc);
-
-alter table public.download_events enable row level security;
--- No policies: service role only (customers never read their own audit rows
--- through the browser; the API reports only its own decisions).
-
-
--- -----------------------------------------------------------------------------
--- 10. webhook_events — Paystack event ingestion + deduplication
+-- 8. webhook_events — Paystack event ingestion + deduplication
 --
 -- dedupe_key is UNIQUE and is the idempotency backbone:
 --   * webhook deliveries: "<event>:<provider data id>" (falls back to
@@ -494,7 +390,7 @@ alter table public.webhook_events enable row level security;
 
 
 -- -----------------------------------------------------------------------------
--- 11. audit_logs — security-relevant actions
+-- 9. audit_logs — security-relevant actions
 -- -----------------------------------------------------------------------------
 
 create table public.audit_logs (
@@ -511,60 +407,14 @@ create table public.audit_logs (
 );
 
 comment on table public.audit_logs is
-  'Append-only security trail (checkout, verification, webhook failures, '
-  'download grants/denials). Retention: 24 months.';
+  'Append-only security trail (checkout, verification, webhook failures). '
+  'Retention: 24 months.';
 
 create index audit_logs_actor_idx on public.audit_logs (actor_user_id, created_at desc);
 create index audit_logs_action_idx on public.audit_logs (action, created_at desc);
 
 alter table public.audit_logs enable row level security;
 -- No policies: service role only; never updated or deleted from the app.
-
-
--- -----------------------------------------------------------------------------
--- 12. Private installer storage
---
--- Bucket assumptions (see landing/docs/04-installer-delivery-and-licensing.md):
---   * private (public = false): no anonymous reads, no CDN caching of the
---     installer, no listing;
---   * only the service role (RLS-bypassing) can read objects or mint
---     short-lived signed URLs — the /api/download function does this after
---     checking the caller's entitlement;
---   * uploads happen out-of-band by the owner using the service-role key
---     (Supabase dashboard storage UI or `supabase storage` CLI / REST API).
---     No application code path uploads to this bucket.
--- -----------------------------------------------------------------------------
-
-insert into storage.buckets (id, name, public, file_size_limit)
-values ('installers', 'installers', false, 524288000)  -- 500 MB headroom
-on conflict (id) do nothing;
-
--- This is a dedicated commerce project whose only bucket is 'installers'.
--- Remove any pre-existing storage.objects policies so the bucket is
--- service-role-only. (Safe here; would NOT be run against a shared project.)
-do $$
-declare
-  policy_record record;
-begin
-  for policy_record in
-    select policyname from pg_policies
-    where schemaname = 'storage' and tablename = 'objects'
-  loop
-    execute format('drop policy %I on storage.objects', policy_record.policyname);
-  end loop;
-end;
-$$;
-
--- Resulting access model (documented, not enforced by a policy):
---   anon          -> no policies -> no SELECT/INSERT/UPDATE/DELETE at all
---   authenticated -> no policies -> no SELECT/INSERT/UPDATE/DELETE at all
---   service_role  -> bypasses RLS -> the only path to objects/signed URLs
---
--- To verify after running the migration (run manually, review output):
---   select policyname from pg_policies
---    where schemaname = 'storage' and tablename = 'objects';   -- expect 0 rows
---   select id, public from storage.buckets where id = 'installers';
---                                                             -- expect false
 
 
 -- =============================================================================
@@ -581,10 +431,6 @@ $$;
 --   -- delete webhook rows older than 12 months
 --   delete from public.webhook_events
 --    where received_at < now() - interval '12 months';
---
---   -- delete download audit rows older than 12 months
---   delete from public.download_events
---    where granted_at < now() - interval '12 months';
 --
 --   -- delete audit logs older than 24 months
 --   delete from public.audit_logs

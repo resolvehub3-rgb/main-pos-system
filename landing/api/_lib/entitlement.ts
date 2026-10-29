@@ -12,10 +12,9 @@
  * record an accurate audit row — they are safe to show to the customer too
  * (they only describe their own subscription state).
  *
- * NOTE: this governs delivery of the installer FILE. It does not enforce
- * the licence inside an installed copy of SamTill — that is a separate,
- * future POS integration requiring explicit approval
- * (docs/04-installer-delivery-and-licensing.md).
+ * NOTE: this governs access windows for paid features. It does not enforce
+ * the licence inside a running copy of SamTill — that is a separate,
+ * future POS integration requiring explicit approval.
  */
 
 /** The product entitlements are issued for. */
@@ -110,7 +109,7 @@ export function decideVerifiedAccountDownload(emailConfirmed: boolean | undefine
   return {allowed: false, reason: 'email_unverified'};
 }
 
-/** Map a decision to the `download_events.result` vocabulary (see SQL). */
+/** Map a decision to a stable audit-result vocabulary string. */
 export function toDownloadEventResult(decision: DownloadDecision): string {
   switch (decision.reason) {
     case 'granted':

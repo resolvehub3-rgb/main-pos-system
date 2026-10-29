@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {buildCustomerDisplayState, cartToCustomerItems, hasActiveSale} from './customerDisplay.ts';
+import {buildCustomerDisplayState, cartToCustomerItems} from './customerDisplay.ts';
 import type {CartItem, Product} from '../types';
 
 const product = (overrides: Partial<Product> = {}): Product => ({
@@ -59,22 +59,8 @@ test('buildCustomerDisplayState carries shop name, projected lines and total', (
   assert.equal(state.items[0].quantity, 2);
 });
 
-/* -------------------------------------------------------------------------- */
-/* Frameless window close guard: never silently discard an in-progress sale.   */
-/* -------------------------------------------------------------------------- */
-
-test('hasActiveSale is true while the till holds unsold lines', () => {
-  const state = buildCustomerDisplayState('Accra Mall Supermarket', [cartItem()], 25);
-  assert.equal(hasActiveSale(state), true);
-});
-
-test('hasActiveSale is false for an empty cart (sale completed / cleared)', () => {
-  const state = buildCustomerDisplayState('Accra Mall Supermarket', [], 0);
-  assert.equal(hasActiveSale(state), false);
-});
-
-test('hasActiveSale is false before any cart was ever pushed', () => {
-  // Startup / logged-out: main has no cached state yet, so closing must not
-  // be blocked waiting for a push that will never arrive.
-  assert.equal(hasActiveSale(null), false);
+test('buildCustomerDisplayState for an empty cart projects no lines', () => {
+  const state = buildCustomerDisplayState('', [], 0);
+  assert.deepEqual(state.items, []);
+  assert.equal(state.totalAmount, 0);
 });

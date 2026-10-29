@@ -13,8 +13,8 @@
  *   `loading` resolves to false, so guarded screens can render their
  *   "not available" notice instead of hanging.
  *
- * NOTE: this is a UX guard, not a security boundary. The only real boundary is
- * the server-side session check inside POST /api/download.
+ * NOTE: this is a UX guard, not a security boundary — the commerce API
+ * performs its own server-side session checks on every authenticated request.
  */
 
 import {useCallback, useEffect, useState} from 'react';

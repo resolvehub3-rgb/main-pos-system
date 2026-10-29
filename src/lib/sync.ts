@@ -233,6 +233,12 @@ export function tenantRow(t: Tenant): Record<string, unknown> {
 }
 
 export function userRow(u: UserAccount): Record<string, unknown> {
+  // Credentials are deliberately NOT mirrored. `password` and `pin` are the
+  // account's secret; writing them to a row that any holder of the anon key
+  // can read (pre-lockdown RLS) would expose every user's secret. Auth moves
+  // to Supabase Auth, which stores its own server-side hash — the row carries
+  // only non-secret profile fields. Omitting the keys leaves any legacy
+  // plaintext columns untouched until the Stage B migration scrubs them.
   return {
     id: toUuid(u.id),
     tenant_id: uuidOrNull(u.tenant_id),
@@ -240,8 +246,6 @@ export function userRow(u: UserAccount): Record<string, unknown> {
     full_name: u.full_name,
     email: u.email,
     phone: u.phone || null,
-    password: u.password || null,
-    pin: u.pin || null,
     role: u.role,
     is_active: u.is_active,
     created_at: u.created_at,

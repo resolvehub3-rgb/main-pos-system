@@ -1,7 +1,7 @@
 /**
  * Checkout flow client — published plans, checkout start, payment verification.
  *
- * Same rules as downloadClient.ts:
+ * Same rules across every endpoint:
  *  - the response of each server endpoint is mapped to a result the UI can
  *    render honestly (never a guessed success, never an invented URL),
  *  - classification is a pure function so every branch is unit-tested without

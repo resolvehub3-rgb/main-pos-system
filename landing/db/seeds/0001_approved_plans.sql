@@ -17,8 +17,8 @@
 --   * billing_type = 'one_time' — a single charge, no auto-renewal;
 --   * interval_months = 6 — the access window a payment grants (the included
 --     maintenance/support period). The event reducer turns this into
---     entitlement.valid_to, so a purchase grants installer downloads and
---     updates for six months;
+--     entitlement.valid_to, so a purchase grants six months of app access,
+--     updates and support;
 --   * `code` MUST equal the `id` of the matching package in
 --     landing/src/config/pricing.ts, or the website cannot buy that package.
 --

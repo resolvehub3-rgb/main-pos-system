@@ -127,8 +127,26 @@ test('userRow maps to the new users table and keeps the role the CHECK allows', 
   assert.equal(row.id, toUuid(user.id));
   assert.equal(row.tenant_id, toUuid(tenant.id));
   assert.equal(row.role, 'shop_owner');
-  assert.equal(row.pin, null, 'absent optional fields become null, not undefined');
   assert.equal(row.shop_name, 'Accra Fresh Mart');
+});
+
+test('userRow never mirrors account credentials to the remote database', () => {
+  // Regression guard: passwords and PINs must never leave the device. They
+  // used to be written to a row any holder of the anon key could read. Auth
+  // moves to Supabase Auth, which keeps its own server-side hash.
+  const row = userRow({
+    id: 'user-cred',
+    full_name: 'Kwame Owner',
+    email: 'kwame@example.com',
+    phone: '0244000002',
+    role: 'shop_owner',
+    password: 'super-secret-password',
+    pin: '9876',
+    is_active: true,
+    created_at: now,
+  });
+  assert.ok(!('password' in row), 'password must not be present in the mirrored row');
+  assert.ok(!('pin' in row), 'pin must not be present in the mirrored row');
 });
 
 test('blank ids become SQL NULL rather than an empty string', () => {

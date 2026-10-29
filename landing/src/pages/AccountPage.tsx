@@ -4,7 +4,8 @@ import GateNotice from '../components/account/GateNotice';
 import StatusBanner, {type BannerTone} from '../components/account/StatusBanner';
 import {COMMERCE} from '../config/commerce';
 import {PACKAGES} from '../config/pricing';
-import {accountAvailability, checkoutAvailability, downloadAvailability} from '../lib/availability';
+import {SITE} from '../config/site';
+import {accountAvailability, checkoutAvailability} from '../lib/availability';
 import {resendConfirmation} from '../lib/authFlow';
 import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
 import {fetchMyAccess, type AccessResult} from '../lib/checkoutClient';
@@ -14,8 +15,7 @@ import {useAccountSession} from '../lib/useAccountSession';
 
 /**
  * Signed-in customer account screen: identity, email-verification status,
- * the licence this account holds, entry point to the installer download and
- * sign-out.
+ * the licence this account holds, how to get the app, and sign-out.
  *
  * Verification status is read from the session the provider returned — the
  * screen never states that an address is verified unless the provider says
@@ -31,7 +31,6 @@ function planLabel(planCode: string | null): string {
 export default function AccountPage() {
   const availability = accountAvailability(COMMERCE, readCommerceEnv());
   const checkout = checkoutAvailability(COMMERCE, readCommerceEnv());
-  const download = downloadAvailability(COMMERCE, readCommerceEnv());
   const {loading, account, session, signOut} = useAccountSession();
   const [banner, setBanner] = useState<{tone: BannerTone; message: string} | null>(null);
   const [resending, setResending] = useState(false);
@@ -116,7 +115,7 @@ export default function AccountPage() {
   return (
     <AccountShell
       title="My account"
-      subtitle="Your SamTill customer account details and downloads."
+      subtitle="Your SamTill customer account details."
       footer={
         <a href="#/" className="font-semibold text-navy-700 underline-offset-4 hover:underline">
           Back to the SamTill website
@@ -168,7 +167,7 @@ export default function AccountPage() {
             <>
               <p className="mt-1 text-sm text-navy-700">
                 This account does not have a licence yet. Choose a package to buy one — your
-                licence and downloads appear here as soon as payment is confirmed.
+                licence appears here as soon as payment is confirmed.
               </p>
               {checkout.available ? (
                 <button
@@ -209,7 +208,7 @@ export default function AccountPage() {
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
                       {withinWindow
-                        ? 'Downloads and included support run until '
+                        ? 'Access and included support run until '
                         : entitlement.status === 'revoked'
                           ? 'Access was revoked on '
                           : 'Included access ended on '}
@@ -245,27 +244,23 @@ export default function AccountPage() {
       )}
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-        <h2 className="text-sm font-bold text-navy-900">Windows installer</h2>
-        {download.available ? (
-          <>
-            <p className="mt-1 text-sm text-navy-700">
-              Download the genuine SamTill Windows installer for your account.
-            </p>
-            <button
-              type="button"
-              onClick={() => navigateTo('/download')}
-              className="mt-3 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
-            >
-              Go to downloads →
-            </button>
-          </>
-        ) : (
-          <p className="mt-1 text-sm text-navy-700">{download.notice}</p>
+        <h2 className="text-sm font-bold text-navy-900">Get the app</h2>
+        <p className="mt-1 text-sm text-navy-700">
+          SamTill runs in the browser and installs as an app. Open the SamTill web app, then use
+          your browser’s Install app / Add to Home Screen feature to keep it on your device.
+        </p>
+        {SITE.webAppUrl && (
+          <a
+            href={SITE.webAppUrl}
+            className="mt-3 inline-flex rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
+          >
+            Open the SamTill app →
+          </a>
         )}
       </div>
 
       <p className="mt-6 rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed text-slate-500">
-        Your account gives you access to your downloads and account information. Creating an
+        Your account holds your licence and account information. Creating an
         account does not activate a SamTill POS licence and does not commit you to any payment.
       </p>
 

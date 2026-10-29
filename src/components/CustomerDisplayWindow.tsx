@@ -1,22 +1,22 @@
 import React, {useEffect, useState} from 'react';
 import {CustomerDisplayModal} from './CustomerDisplayModal';
 import {
-  closeNativeCustomerDisplay,
-  getCustomerDisplayState,
-  isDesktop,
-  onCustomerDisplayState,
-} from '../lib/desktopBridge';
+  announceDisplayClosed,
+  subscribeCustomerDisplay,
+} from '../lib/customerDisplayChannel';
 import type {CustomerDisplayState} from '../types';
 
 /**
- * Root component of the native customer display window (Electron only).
+ * Root component of the customer display POPUP window (browser/PWA).
  *
- * Rendered when the window loads `/?view=customer-display`. It:
- *  - restores the last state the cashier pushed (also after a reload),
+ * Rendered when a window loads `/?view=customer-display`. The cashier opens
+ * it with the "Customer Display" button (window.open — must be a user
+ * gesture) and drags it to the customer-facing screen. It:
+ *  - requests the current sale on load (also after a reload),
  *  - live-updates on every scan/quantity change/removal/sale completion the
- *    cashier pushes over IPC,
+ *    cashier publishes over BroadcastChannel (src/lib/customerDisplayChannel),
  *  - shows the existing welcome screen while no sale is active,
- *  - closes the native window through IPC when the operator clicks the X.
+ *  - closes its own window when the operator clicks the X.
  *
  * It deliberately imports no database, auth or business logic — the cashier
  * window stays the single source of truth for the cart.
@@ -25,19 +25,11 @@ export const CustomerDisplayWindow: React.FC = () => {
   const [state, setState] = useState<CustomerDisplayState | null>(null);
 
   useEffect(() => {
-    if (!isDesktop()) return;
-    let cancelled = false;
-
-    // Restore the current sale (covers window opening late and reloads).
-    getCustomerDisplayState()
-      .then((s) => {
-        if (!cancelled && s) setState(s);
-      })
-      .catch(() => undefined);
-
-    const unsubscribe = onCustomerDisplayState((next) => setState(next));
+    // The subscribe call announces this window, so the cashier replies with
+    // the current cart even if it changed before we were listening.
+    const unsubscribe = subscribeCustomerDisplay((next) => setState(next));
     return () => {
-      cancelled = true;
+      announceDisplayClosed();
       unsubscribe();
     };
   }, []);
@@ -47,7 +39,7 @@ export const CustomerDisplayWindow: React.FC = () => {
       tenantName={state?.tenantName || 'SamTill POS'}
       items={state?.items ?? []}
       totalAmount={state?.totalAmount ?? 0}
-      onClose={() => closeNativeCustomerDisplay()}
+      onClose={() => window.close()}
     />
   );
 };

@@ -4,7 +4,8 @@ import GateNotice from '../components/account/GateNotice';
 import StatusBanner, {type BannerTone} from '../components/account/StatusBanner';
 import {COMMERCE} from '../config/commerce';
 import {LICENCE_TERMS, PACKAGES} from '../config/pricing';
-import {checkoutAvailability, downloadAvailability} from '../lib/availability';
+import {SITE} from '../config/site';
+import {checkoutAvailability} from '../lib/availability';
 import {readCommerceEnv} from '../lib/commerceClient';
 import {
   checkoutFailureMessage,
@@ -60,7 +61,6 @@ function bannerToneFor(kind: string): BannerTone {
 export default function CheckoutPage() {
   const apiBase = readCommerceEnv().apiBase;
   const availability = checkoutAvailability(COMMERCE, readCommerceEnv());
-  const download = downloadAvailability(COMMERCE, readCommerceEnv());
   const route = useHashRoute();
   const {loading, account, signOut} = useAccountSession();
 
@@ -227,7 +227,7 @@ export default function CheckoutPage() {
               <div>
                 <dt className="font-bold text-navy-900">Access includes</dt>
                 <dd className="mt-0.5 text-navy-700">
-                  Installer downloads and software updates for{' '}
+                  App updates and software access for{' '}
                   {LICENCE_TERMS.includedSupportMonths} months from purchase, plus{' '}
                   {LICENCE_TERMS.includedSupportMonths} months of maintenance and support.
                 </dd>
@@ -251,22 +251,23 @@ export default function CheckoutPage() {
             </dl>
           )}
 
-          {download.available ? (
+          {SITE.webAppUrl ? (
             <a
-              href="#/download"
+              href={SITE.webAppUrl}
               className="mt-5 block w-full rounded-full bg-amber-700 px-6 py-3.5 text-center text-sm font-bold text-white transition-colors hover:bg-amber-800"
             >
-              Download the SamTill installer →
+              Open the SamTill app →
             </a>
           ) : (
             <p className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-navy-700">
-              {download.notice}
+              SamTill runs in the browser and installs as an app: open the SamTill web app, then
+              use your browser’s Install app / Add to Home Screen feature.
             </p>
           )}
 
           <p className="mt-5 text-xs leading-relaxed text-slate-500">
-            Your licence is permanent for the version you bought; downloads and support run for the
-            included six months. Install the till, then sign in with the same email address and
+            Your licence is permanent for the version you bought; access and support run for the
+            included six months. Sign in to the web app with the same email address and
             password you used here. Keep the reference above for your records.
           </p>
         </AccountShell>
@@ -373,7 +374,7 @@ export default function CheckoutPage() {
         }
       >
         <GateNotice
-          notice="A SamTill account holds your licence and your downloads, so payment needs a sign-in first. Your chosen package is kept — you will come straight back here."
+          notice="A SamTill account holds your licence, so payment needs a sign-in first. Your chosen package is kept — you will come straight back here."
           actionHref={loginHref('/checkout')}
           actionLabel="Sign in"
         />
@@ -547,7 +548,7 @@ export default function CheckoutPage() {
           <dd className="text-right text-navy-700">{LICENCE_TERMS.includedSupportMonths} months</dd>
         </div>
         <div className="flex items-baseline justify-between gap-4">
-          <dt className="font-bold text-navy-900">Downloads &amp; updates</dt>
+          <dt className="font-bold text-navy-900">Updates &amp; support</dt>
           <dd className="text-right text-navy-700">
             {plan.intervalMonths} months from purchase
           </dd>

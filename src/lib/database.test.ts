@@ -77,6 +77,21 @@ test('deleteUser removes a cashier but refuses to strand the shop', () => {
     password: 'secret2',
     is_active: true,
   });
+  // A super admin can now only be created under an authenticated super-admin
+  // session — addUser() no longer lets a client mint a privileged role from
+  // nowhere. The first super admin is provisioned in production via the
+  // Supabase Admin API; here the session is established directly so the
+  // deleteUser guard below is still exercised against a real super_admin row.
+  const beforeAdminSession = db.getCurrentUser();
+  db.setCurrentUser({
+    id: 'test-super-admin-session',
+    full_name: 'Provisioned Admin',
+    email: 'root-provisioned@example.com',
+    phone: '',
+    role: 'super_admin',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  });
   const root = db.addUser({
     full_name: 'Platform Admin',
     email: 'root-delete@example.com',
@@ -85,6 +100,7 @@ test('deleteUser removes a cashier but refuses to strand the shop', () => {
     password: 'secret3',
     is_active: true,
   });
+  db.setCurrentUser(beforeAdminSession);
 
   assert.notEqual(owner.id, cashier.id, 'staff created together need distinct ids');
 

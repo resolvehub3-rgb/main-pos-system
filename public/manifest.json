@@ -5,9 +5,13 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
   "background_color": "#F5F7FA",
   "theme_color": "#102A4C",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["business", "finance", "productivity"],
   "description": "Production-ready multi-tenant supermarket and retail POS SaaS built for Ghanaian businesses, with real Supabase database, live sales analytics, barcode scanning, inventory ledger and role-based access.",
   "prefer_related_applications": false,
   "icons": [
@@ -22,6 +26,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

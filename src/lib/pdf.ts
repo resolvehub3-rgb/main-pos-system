@@ -383,11 +383,10 @@ export function buildPrintHtml(opts: PdfReportOptions): string {
  * (user can print or "Save as PDF").
  *
  * The print trigger lives here, in the opener, rather than in an inline
- * `<script>` inside the popup document: the popup inherits this page's
- * Content-Security-Policy (`script-src 'self'`), which would block an inline
- * script in the desktop app — while this file's own script always runs. The
- * user-visible behaviour (report window opens, then the print dialog after the
- * page settles) is unchanged.
+ * `<script>` inside the popup document: an inline script is a common
+ * Content-Security-Policy casualty (`script-src 'self'`), while this file's
+ * own script always runs. The user-visible behaviour (report window opens,
+ * then the print dialog after the page settles) is unchanged.
  */
 export function printReport(opts: PdfReportOptions): void {
   const win = window.open('', '_blank', 'width=1200,height=800');

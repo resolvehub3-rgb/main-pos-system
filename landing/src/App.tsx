@@ -11,7 +11,6 @@ import Nav from './components/Nav';
 import Pricing from './components/Pricing';
 import Screenshots from './components/Screenshots';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
-import DownloadPage from './pages/DownloadPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -29,7 +28,7 @@ import {useHashRoute} from './lib/useHashRoute';
  * Marketing sections render for the home route and for plain section anchors
  * (`#features`, `#contact`, …). Hash routes that start with `#/` switch to
  * the customer account screens (register / verify / sign in / account /
- * download / checkout) without any server rewrite rules, so the static build
+ * checkout) without any server rewrite rules, so the static build
  * keeps working on any host.
  *
  * Paystack returns from its hosted page to `/?checkout=return&reference=…`
@@ -52,8 +51,6 @@ function renderAccountScreen(route: ParsedRoute & {path: AccountRoute}) {
       return <ResetPasswordPage route={route} />;
     case '/account':
       return <AccountPage />;
-    case '/download':
-      return <DownloadPage />;
     case '/checkout':
       return <CheckoutPage />;
   }

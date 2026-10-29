@@ -1,70 +1,58 @@
 import React, {useEffect, useState} from 'react';
-import {Download, RefreshCw, X} from 'lucide-react';
-import {checkForUpdates, isDesktop, onUpdateStatus, openExternalUrl} from '../lib/desktopBridge';
-import type {UpdateStatus} from '../types/desktop';
+import {RefreshCw, X} from 'lucide-react';
+import {applyUpdate, onUpdateReady} from '../lib/pwa';
 
 /**
- * Non-blocking update notification (desktop only).
+ * PWA update notification (replaces the old desktop installer toast).
  *
- * The main process checks the publisher's release manifest at startup and
- * pushes the result over IPC; this strip only ever *informs* — the cashier
- * chooses "Download update" (which opens the publisher-hosted installer page
- * in the OS browser) or "Later". Nothing downloads, installs or restarts the
- * till from here, so a transaction is never interrupted.
- *
- * Never renders in the browser/PWA (no bridge → no status).
+ * Shown when a new service-worker version has been downloaded and is
+ * waiting. It NEVER applies itself: the operator presses "Update now" (which
+ * reloads once) or dismisses it and keeps working — an in-progress checkout
+ * is never destroyed by a silent background reload.
  */
 export const UpdateNotice: React.FC = () => {
-  const [status, setStatus] = useState<UpdateStatus | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [updateReady, setUpdateReady] = useState<boolean>(false);
+  const [dismissed, setDismissed] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!isDesktop()) return;
-    let alive = true;
-    // The main process pushes its startup result (re-pushed after reloads);
-    // this mount-time check covers the case where that push happened while
-    // the operator was still on the login screen.
-    void checkForUpdates().then((next) => {
-      if (alive && next) setStatus(next);
+    return onUpdateReady(() => {
+      // A dismissed notice re-appears only on a fresh update event, not on
+      // every page load — pressing Update later is still possible because
+      // the waiting worker stays waiting.
+      setDismissed(false);
+      setUpdateReady(true);
     });
-    const unsubscribe = onUpdateStatus((next) => {
-      if (!alive) return;
-      setStatus(next);
-      if (next.state === 'available') setDismissed(false);
-    });
-    return () => {
-      alive = false;
-      unsubscribe();
-    };
   }, []);
 
-  if (!isDesktop() || dismissed || status?.state !== 'available') return null;
+  if (!updateReady || dismissed) return null;
 
   return (
-    <div className="sticky top-16 z-30 bg-[#102A4C] text-orange-200 px-4 py-2 border-b border-amber-500/40 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
-      <div className="flex items-center gap-2">
-        <RefreshCw className="w-4 h-4 text-amber-400" />
-        <span>
-          Update available: SamTill POS v{status.currentVersion} &rarr; v{status.version}
-          {status.notes ? ` — ${status.notes}` : ''}
+    <div
+      role="status"
+      aria-live="polite"
+      className="sticky top-16 z-40 bg-[#102A4C] text-white border-b border-orange-500/40 shadow-md"
+    >
+      <div className="max-w-[1920px] mx-auto px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3 text-xs sm:text-sm">
+        <span className="font-semibold">
+          A new version of SamTill is ready. It applies only when you choose — your current sale
+          will not be interrupted.
         </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => openExternalUrl(status.state === 'available' ? status.url : '')}
-          className="flex items-center gap-1.5 px-3 py-1 bg-[#F28C28] hover:bg-orange-600 text-white rounded-lg transition font-bold"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>Download update</span>
-        </button>
-        <button
-          onClick={() => setDismissed(true)}
-          aria-label="Dismiss update notice"
-          className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition font-bold"
-        >
-          <X className="w-3.5 h-3.5" />
-          <span>Later</span>
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={applyUpdate}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F28C28] hover:bg-orange-600 text-white rounded-lg transition font-bold cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Update now</span>
+          </button>
+          <button
+            onClick={() => setDismissed(true)}
+            aria-label="Dismiss update notice"
+            className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-slate-600 text-slate-200 transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,9 +1,6 @@
-import {COMMERCE} from '../config/commerce';
-import {downloadAvailability} from '../lib/availability';
-import {readCommerceEnv} from '../lib/commerceClient';
 import {Reveal} from './Reveal';
 
-function buildFaqs(downloadOpen: boolean): Array<{q: string; a: string}> {
+function buildFaqs(): Array<{q: string; a: string}> {
   return [
   {
     q: 'What is SamTill?',
@@ -22,10 +19,8 @@ function buildFaqs(downloadOpen: boolean): Array<{q: string; a: string}> {
     a: 'No. Online payment is not available yet. You enquire first, agree the package and terms with SamTeck Digital directly, and payment is arranged between you and the business.',
   },
   {
-    q: 'Can I download and install it myself?',
-    a: downloadOpen
-      ? 'Yes — create or sign in to your SamTill account on this site and open the download page to get a short-lived link to the verified Windows installer for your account. SamTeck Digital can still help with installation and setup in your shop.'
-      : 'Not yet. A download will only be published once the owner has approved a verified, secure installer. Until then, installation is arranged with SamTeck Digital as part of setup.',
+    q: 'Can I install it myself?',
+    a: 'Yes — SamTill runs in the browser and installs as an app: open the SamTill web app, then use your browser’s Install app (or Add to Home Screen) feature to keep it on your device. SamTeck Digital can still help with setup in your shop.',
   },
   {
     q: 'What hardware do I need?',
@@ -43,7 +38,7 @@ function buildFaqs(downloadOpen: boolean): Array<{q: string; a: string}> {
 }
 
 export default function Faq() {
-  const faqs = buildFaqs(downloadAvailability(COMMERCE, readCommerceEnv()).available);
+  const faqs = buildFaqs();
 
   return (
     <section id="faq" className="bg-navy-950 py-20 lg:py-28">

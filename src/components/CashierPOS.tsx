@@ -456,7 +456,7 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
         })}
       </div>
 
-      {/* Desktop Left Navigation Sidebar */}
+      {/* Left Navigation Sidebar (responsive: drawer on mobile, column on desktop) */}
       <aside className="w-60 bg-[#102A4C] text-slate-300 flex-col justify-between border-r border-slate-800 flex-shrink-0 hidden md:flex">
         <div>
           <div className="p-4 border-b border-slate-800">

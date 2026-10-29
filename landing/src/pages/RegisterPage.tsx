@@ -109,7 +109,7 @@ export default function RegisterPage() {
   return (
     <AccountShell
       title="Create your SamTill account"
-      subtitle="Register to access your SamTill downloads and account information. We only ask for what the account needs."
+      subtitle="Register to manage your SamTill account and licence. We only ask for what the account needs."
       footer={
         <p>
           Already registered?{' '}
