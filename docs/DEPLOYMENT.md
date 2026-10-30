@@ -33,9 +33,10 @@ SamTill is a **Progressive Web App** — there is no desktop installer; customer
 install it from the browser (Install app / Add to Home Screen).
 
 1. Import the repository into [vercel.com](https://vercel.com) (the existing
-   `samtillpos` project).
-2. Framework preset: **Vite**. Build command: `pnpm build`. Output directory:
-   `dist`. Install command: `pnpm install`.
+   `samtillpos` project). The root [`vercel.json`](../vercel.json) configures
+   the pnpm build, `dist` output, and SPA route fallback.
+2. Framework preset: **Vite** (or **Other** when using the checked-in
+   `vercel.json` settings).
 3. Environment variables (Project → Settings → Environment Variables):
    - `VITE_SUPABASE_URL` — e.g. `https://xyzcompany.supabase.co`
    - `VITE_SUPABASE_ANON_KEY` — public anon token (safe by design, guarded by RLS)
