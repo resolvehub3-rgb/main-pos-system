@@ -149,7 +149,7 @@ is a silent data-loss path:
 | `users.email` | Each browser bootstraps the super admin from `VITE_SUPER_ADMIN_EMAIL` with its own `user-<timestamp>` id. A second browser/origin upserts the same email under a different UUID → 409, account never stored. |
 | `tenants.slug` | Derived from the shop name, so two shops with the same name collide — and the tenant is the head of every FK chain, so its products and sales go with it. Never looked up as a key. |
 | `sales(tenant_id, invoice_number)` | `invoice_number` is `REC-` + last 6 digits of `Date.now()`, which repeats every ~16.7 minutes. A duplicated invoice number in a backup beats a missing sale. |
-| `products(tenant_id, barcode)` | `addProduct` does not reject a barcode already in use in the same shop. |
+| `products(tenant_id, barcode)` | `addProduct` used to accept a barcode already in use in the same shop. It now rejects duplicates app-side (see `src/lib/barcode.ts` → `findBarcodeConflict`), but the constraint stays dropped: shops that registered products before that guard existed may already hold historical duplicates, and a strict constraint would silently discard them from the mirror. |
 
 `product_categories(tenant_id, name)` is deliberately **left UNIQUE** —
 `addCategory` rejects duplicates before syncing, so it can never reject a row

@@ -166,6 +166,13 @@ export function adoptTenant(raw: Record<string, unknown>): Tenant {
     phone: text(raw.phone),
     email: text(raw.email),
     address: text(raw.address),
+    // NULL → undefined (never edited → app default) is preserved as-is; an
+    // empty string survives as an explicit "no footer", so a cleared note does
+    // not read back as the default note.
+    receipt_footer:
+      raw.receipt_footer === null || raw.receipt_footer === undefined
+        ? undefined
+        : text(raw.receipt_footer),
     tax_number: optionalText(raw.tax_number),
     currency: text(raw.currency) || 'GHS',
     is_active: raw.is_active !== false,

@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CheckCircle2, Printer, X } from 'lucide-react';
 import { formatGHS } from '../lib/money';
+import { receiptFooterText } from '../lib/receiptFooter';
 import { Sale, Tenant } from '../types';
 
 /**
@@ -50,6 +51,8 @@ export const ReceiptPrinterModal: React.FC<ReceiptPrinterModalProps> = ({
 
   const paperWidth = paperSize === '58mm' ? 172 : 198;
   const storeName = (tenant.name || 'SamTill').toUpperCase();
+  /** Owner-edited receipt footer, already trimmed; `''` = no note at all. */
+  const footerNote = receiptFooterText(tenant).trim();
   const items = sale.items ?? [];
   const printedItems = items.slice(0, MAX_PRINTED_ITEMS);
   const hiddenItems = items.length - printedItems.length;
@@ -245,8 +248,9 @@ export const ReceiptPrinterModal: React.FC<ReceiptPrinterModalProps> = ({
 
                   {/* Footer + decorative barcode */}
                   <div className="text-center">
-                    <p className="font-bold text-[8.5px] text-slate-700">Thank you for shopping with us!</p>
-                    <p className="text-[7.5px] text-slate-500">Goods sold are returnable within 48h.</p>
+                    {footerNote && (
+                      <p className="font-bold text-[8.5px] text-slate-700">{footerNote}</p>
+                    )}
                     <div className="mt-1.5 flex items-end justify-center gap-[1.5px] h-6">
                       {barcodeBars.map((w, i) => (
                         <span

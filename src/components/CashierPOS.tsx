@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Search,
   Barcode,
@@ -31,6 +31,7 @@ import {
 import confetti from 'canvas-confetti';
 import { formatGHS, calculateCartTotals, calculateCashChange } from '../lib/money';
 import { playScannerBeep, playSaleChime } from '../lib/sound';
+import { findProductByBarcode } from '../lib/barcode';
 import { useTerminalSettings } from '../lib/terminalSettings';
 import { ReceiptPrinterModal } from './ReceiptPrinterModal';
 import { Product, CartItem, Sale, Tenant, CashRegisterShift, ParkedCart } from '../types';
@@ -49,6 +50,14 @@ interface CashierPOSProps {
   onOpenCustomerDisplay: () => void;
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
+  /**
+   * App is holding a sign-out request until this till's shift is closed.
+   * While it is set, the close-shift Z-report modal is forced open so the
+   * operator can count the drawer and release the sign-out.
+   */
+  pendingSignOut?: boolean;
+  /** The operator dismissed the close-shift prompt — keep them signed in. */
+  onCancelSignOut?: () => void;
 }
 
 export const CashierPOS: React.FC<CashierPOSProps> = ({
@@ -60,6 +69,8 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   onOpenCustomerDisplay,
   cart,
   setCart,
+  pendingSignOut = false,
+  onCancelSignOut,
 }) => {
   // Navigation Tabs for Cashier
   const [activeTab, setActiveTab] = useState<'pos' | 'history' | 'checker' | 'shift'>('pos');
@@ -69,6 +80,14 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [barcodeInput, setBarcodeInput] = useState('');
   const [activePaymentModal, setActivePaymentModal] = useState<'cash' | 'momo' | 'card' | 'split' | null>(null);
+
+  // Transient feedback for the scan field: added to cart / barcode not
+  // registered / out of stock. Replaces the old blocking `alert()`s so a
+  // cashier can keep pulling the scanner trigger without dismissing dialogs.
+  const [scanMessage, setScanMessage] = useState<
+    { kind: 'success' | 'error'; text: string } | null
+  >(null);
+  const scanMessageTimerRef = useRef<number | null>(null);
 
   // Cash tendered state
   const [cashTendered, setCashTendered] = useState<number>(0);
@@ -184,46 +203,103 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   }));
   const totals = calculateCartTotals(cartCalculations);
 
-  // Barcode scanner keydown listener (Enter triggers scan)
-  const handleBarcodeSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!barcodeInput.trim()) return;
+  // Keep the cursor in the scan box so the next scanner trigger lands here:
+  // a USB/Bluetooth scanner types into whatever input has focus.
+  const focusScanInput = () => {
+    searchInputRef.current?.focus();
+  };
 
-    const matched = products.find(
-      (p) =>
-        p.barcode === barcodeInput.trim() ||
-        p.sku.toLowerCase() === barcodeInput.trim().toLowerCase()
-    );
-
-    if (matched) {
-      if (beepEnabled) playScannerBeep();
-      addToCart(matched);
-      setBarcodeInput('');
-    } else {
-      alert(`Product with barcode "${barcodeInput}" not found in ${currentTenant.name}.`);
+  // Show a transient scan result; successes fade on their own, errors stay
+  // until the next scan so the cashier can read the barcode off the message.
+  const showScanMessage = (kind: 'success' | 'error', text: string) => {
+    if (scanMessageTimerRef.current !== null) {
+      window.clearTimeout(scanMessageTimerRef.current);
+      scanMessageTimerRef.current = null;
+    }
+    setScanMessage({ kind, text });
+    if (kind === 'success') {
+      scanMessageTimerRef.current = window.setTimeout(() => setScanMessage(null), 2500);
     }
   };
 
-  // Add item to cart
-  const addToCart = (product: Product) => {
-    if (product.stock_quantity <= 0) {
-      alert(`${product.name} is out of stock!`);
+  /**
+   * Resolves a scanned/typed code against this shop's LOCAL product data
+   * (works offline — no Supabase round trip): barcode first (EAN-13, EAN-8,
+   * UPC-A, UPC-E, Code 128/39, including the UPC-A ↔ EAN-13 leading-zero
+   * equivalence), then SKU, then name.
+   */
+  const findSellableProduct = (code: string): Product | undefined =>
+    findProductByBarcode(products, code, { tenantId: currentTenant.id, activeOnly: true }) ||
+    products.find(
+      (p) => p.is_active !== false && p.sku.toLowerCase() === code.trim().toLowerCase()
+    );
+
+  // Barcode scanner keydown listener (Enter triggers scan)
+  const handleBarcodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = barcodeInput.trim();
+    if (!code) {
+      focusScanInput();
       return;
     }
 
+    const matched = findSellableProduct(code);
+
+    if (matched) {
+      const result = addToCart(matched);
+      if (result.ok) {
+        if (beepEnabled) playScannerBeep();
+        showScanMessage(
+          'success',
+          `${matched.name} added — ${result.quantity ?? 1} in cart. Ready for next scan.`
+        );
+      } else {
+        showScanMessage('error', result.message || 'Could not add this product to the cart.');
+      }
+    } else {
+      showScanMessage(
+        'error',
+        `Barcode "${code}" is not registered in ${currentTenant.name}. Check the digits, or ask the shop owner to register the product.`
+      );
+    }
+
+    // Clear the field and refocus: the till stays ready for continuous scanning.
+    setBarcodeInput('');
+    setSearchQuery('');
+    focusScanInput();
+  };
+
+  // Add item to cart. Returns what happened so scan taps and grid taps can
+  // report it inline instead of blocking the till with alert() dialogs.
+  const addToCart = (
+    product: Product
+  ): { ok: boolean; message?: string; quantity?: number } => {
+    if (product.stock_quantity <= 0) {
+      return { ok: false, message: `${product.name} is out of stock!` };
+    }
+
+    // Look the line up in the CURRENT cart (functional updates below can run
+    // later, so the reported quantity is read back from state after update).
+    const existing = cart.find((item) => item.product.id === product.id);
+    if (existing && existing.quantity >= product.stock_quantity) {
+      return {
+        ok: false,
+        message: `Cannot add more ${product.name} — only ${product.stock_quantity} in stock.`,
+      };
+    }
+
     setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
-      if (existing) {
-        if (existing.quantity >= product.stock_quantity) {
-          alert(`Cannot add more. Only ${product.stock_quantity} available in stock.`);
-          return prev;
-        }
+      const inCart = prev.find((item) => item.product.id === product.id);
+      if (inCart) {
+        if (inCart.quantity >= product.stock_quantity) return prev;
         return prev.map((item) =>
           item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
       return [...prev, { product, quantity: 1, discount_percent: 0 }];
     });
+
+    return { ok: true, quantity: (existing?.quantity ?? 0) + 1 };
   };
 
   // Modify quantity
@@ -305,6 +381,16 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
   ) => {
     if (cart.length === 0) return;
 
+    // No open shift → no sale. Rather than a dead button, route the operator
+    // to the drawer screen and open the modal that starts a shift (and drop
+    // any payment modal, which would otherwise overlay the drawer screen).
+    if (!currentShift) {
+      setActivePaymentModal(null);
+      setActiveTab('shift');
+      setShowOpenShiftModal(true);
+      return;
+    }
+
     try {
       const sale = onCompleteSale({
         payment_method: method,
@@ -343,22 +429,34 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
     }
   };
 
-  // Handle price checker search
+  // Handle price checker search. Barcode terms resolve against the LOCAL
+  // product mirror (works offline); a code the till does not recognise falls
+  // back to name matching so the checker still helps find products by word.
   const handleCheckerSearch = (term: string) => {
     setCheckerQuery(term);
     if (!term.trim()) {
       setCheckedProduct(null);
       return;
     }
-    const match = products.find(
-      (p) =>
-        p.barcode === term.trim() ||
-        p.sku.toLowerCase() === term.trim().toLowerCase() ||
-        p.name.toLowerCase().includes(term.toLowerCase())
-    );
+    const match =
+      findProductByBarcode(products, term, { tenantId: currentTenant.id, activeOnly: true }) ||
+      products.find(
+        (p) =>
+          p.is_active !== false &&
+          p.sku.toLowerCase() === term.trim().toLowerCase()
+      ) ||
+      products.find((p) => p.name.toLowerCase().includes(term.toLowerCase()));
     if (match) {
       setCheckedProduct(match);
       if (beepEnabled) playScannerBeep();
+      // A scanned barcode resolved — clear the field so the next scan starts
+      // clean (typed name searches keep their text for editing).
+      if (
+        match.barcode === term.trim() ||
+        match.sku.toLowerCase() === term.trim().toLowerCase()
+      ) {
+        setCheckerQuery('');
+      }
     } else {
       setCheckedProduct(null);
     }
@@ -421,6 +519,56 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
     setOpeningFloat('');
   };
 
+  // A sign-out is being held by App until this shift closes: send the
+  // operator straight to the drawer screen and open the Z-report, since that
+  // is the one control that releases the sign-out. Closing it inside the
+  // modal flips `currentShift` away, which lets App finish the sign-out;
+  // Cancel drops the request instead (see the modal's buttons).
+  useEffect(() => {
+    if (!pendingSignOut || !currentShift) return;
+    setActiveTab('shift');
+    setShowCloseShiftModal(true);
+  }, [pendingSignOut, currentShift]);
+
+  // Keep the till ready to scan: the cursor lives in the scan box whenever
+  // the POS checkout view is showing (mount, returning from another tab or
+  // closing a modal). A USB/Bluetooth scanner types into whatever input has
+  // focus, so continuous scanning works without ever touching the mouse.
+  useEffect(() => {
+    if (
+      activeTab === 'pos' &&
+      !activePaymentModal &&
+      !showParkedModal &&
+      !showCashMovementModal &&
+      !showCloseShiftModal &&
+      !showOpenShiftModal &&
+      !discountItem &&
+      !printingSale
+    ) {
+      focusScanInput();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeTab,
+    activePaymentModal,
+    showParkedModal,
+    showCashMovementModal,
+    showCloseShiftModal,
+    showOpenShiftModal,
+    discountItem,
+    printingSale,
+  ]);
+
+  // Don't leak the transient scan-message timer on unmount.
+  useEffect(
+    () => () => {
+      if (scanMessageTimerRef.current !== null) {
+        window.clearTimeout(scanMessageTimerRef.current);
+      }
+    },
+    []
+  );
+
   // Compute cash change
   const cashChange = calculateCashChange(totals.total, cashTendered);
 
@@ -463,9 +611,6 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="text-xs font-bold text-white uppercase tracking-wider">
-                  Cashier Till #01
-                </span>
               </div>
               <span className="text-[10px] font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
                 Live
@@ -577,30 +722,52 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
           <section className="flex-1 flex flex-col min-w-0 bg-[#F5F7FA] overflow-hidden">
             {/* Top Bar with Barcode Scanner & Search */}
             <div className="p-3 sm:p-4 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shadow-sm">
-              <form
-                onSubmit={handleBarcodeSubmit}
-                className="flex-1 max-w-xl relative flex items-center"
-              >
-                <Search className="w-4 h-4 absolute left-3.5 text-slate-400" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  placeholder="Scan barcode (e.g. 8998866200234) or search product..."
-                  value={barcodeInput || searchQuery}
-                  onChange={(e) => {
-                    setBarcodeInput(e.target.value);
-                    setSearchQuery(e.target.value);
-                  }}
-                  className="w-full pl-10 pr-20 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#F28C28] focus:bg-white transition"
-                />
-                <button
-                  type="submit"
-                  className="absolute right-1.5 top-1.5 bottom-1.5 px-3 bg-[#F28C28] hover:bg-orange-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                >
-                  <Barcode className="w-4 h-4" />
-                  <span className="hidden sm:inline">Scan</span>
-                </button>
-              </form>
+              <div className="flex-1 max-w-xl space-y-1.5">
+                <form onSubmit={handleBarcodeSubmit} className="relative flex items-center">
+                  <Search className="w-4 h-4 absolute left-3.5 text-slate-400" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Scan barcode (e.g. 8998866200234) or search product..."
+                    value={barcodeInput || searchQuery}
+                    onChange={(e) => {
+                      setBarcodeInput(e.target.value);
+                      setSearchQuery(e.target.value);
+                    }}
+                    className="w-full pl-10 pr-20 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#F28C28] focus:bg-white transition"
+                  />
+                  <button
+                    type="submit"
+                    className="absolute right-1.5 top-1.5 bottom-1.5 px-3 bg-[#F28C28] hover:bg-orange-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                  >
+                    <Barcode className="w-4 h-4" />
+                    <span className="hidden sm:inline">Scan</span>
+                  </button>
+                </form>
+
+                {/* Scan result strip: added to cart / barcode not registered.
+                    Shown inline (never a blocking alert) so the scanner can
+                    keep firing straight through. */}
+                {scanMessage && (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold border ${
+                      scanMessage.kind === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                        : 'bg-rose-50 border-rose-200 text-rose-700'
+                    }`}
+                  >
+                    {scanMessage.kind === 'success' ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    )}
+                    <span className="truncate">{scanMessage.text}</span>
+                  </div>
+                )}
+              </div>
 
               {/* Parked Carts and Shortcuts */}
               <div className="flex items-center gap-2">
@@ -659,8 +826,19 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                       <div
                         key={product.id}
                         onClick={() => {
-                          if (beepEnabled) playScannerBeep();
-                          addToCart(product);
+                          const result = addToCart(product);
+                          if (result.ok) {
+                            if (beepEnabled) playScannerBeep();
+                            showScanMessage(
+                              'success',
+                              `${product.name} added — ${result.quantity ?? 1} in cart.`
+                            );
+                          } else {
+                            showScanMessage(
+                              'error',
+                              result.message || 'Could not add this product to the cart.'
+                            );
+                          }
                         }}
                         className="group bg-white rounded-2xl border border-slate-200/90 hover:border-orange-500 hover:shadow-md p-3 flex flex-col justify-between cursor-pointer transition transform active:scale-[0.98]"
                       >
@@ -837,10 +1015,26 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                 </div>
               </div>
 
+              {/* No open shift: this till cannot ring up sales until the drawer is opened */}
+              {!currentShift && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-800">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                    <span>Open a shift to start selling &mdash; checkout is locked until the drawer is opened.</span>
+                  </div>
+                  <button
+                    onClick={() => setShowOpenShiftModal(true)}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-black transition"
+                  >
+                    Open Shift
+                  </button>
+                </div>
+              )}
+
               {/* Payment Method Action Buttons matching screenshot */}
               <div className="grid grid-cols-3 gap-2 mb-2.5">
                 <button
-                  disabled={cart.length === 0}
+                  disabled={cart.length === 0 || !currentShift}
                   onClick={() => {
                     setCashTendered(Math.ceil(totals.total));
                     setActivePaymentModal('cash');
@@ -852,7 +1046,7 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                 </button>
 
                 <button
-                  disabled={cart.length === 0}
+                  disabled={cart.length === 0 || !currentShift}
                   onClick={() => setActivePaymentModal('momo')}
                   className="py-2 px-1.5 rounded-xl bg-[#102A4C] hover:bg-slate-800 disabled:opacity-40 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 shadow-sm transition"
                 >
@@ -861,7 +1055,7 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                 </button>
 
                 <button
-                  disabled={cart.length === 0}
+                  disabled={cart.length === 0 || !currentShift}
                   onClick={() => setActivePaymentModal('card')}
                   className="py-2 px-1.5 rounded-xl bg-[#102A4C] hover:bg-slate-800 disabled:opacity-40 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 shadow-sm transition"
                 >
@@ -872,7 +1066,7 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
 
               {/* Big Orange "Print Receipt" Checkout Action */}
               <button
-                disabled={cart.length === 0}
+                disabled={cart.length === 0 || !currentShift}
                 onClick={() =>
                   handleFinalizeSale('cash', { cash_tendered: totals.total, change_due: 0 })
                 }
@@ -1059,7 +1253,19 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
                     <div className="pt-3">
                       <button
                         onClick={() => {
-                          addToCart(checkedProduct);
+                          const result = addToCart(checkedProduct);
+                          if (result.ok) {
+                            if (beepEnabled) playScannerBeep();
+                            showScanMessage(
+                              'success',
+                              `${checkedProduct.name} added — ${result.quantity ?? 1} in cart.`
+                            );
+                          } else {
+                            showScanMessage(
+                              'error',
+                              result.message || 'Could not add this product to the cart.'
+                            );
+                          }
                           setActiveTab('pos');
                         }}
                         className="flex items-center gap-2 px-4 py-2 bg-[#F28C28] hover:bg-orange-600 text-white rounded-xl text-xs font-bold shadow-md transition"
@@ -1338,7 +1544,7 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
               </button>
               <button
                 type="button"
-                disabled={!cashChange.isSufficient}
+                disabled={!cashChange.isSufficient || !currentShift}
                 onClick={() =>
                   handleFinalizeSale('cash', {
                     cash_tendered: cashTendered,
@@ -1660,6 +1866,13 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
               Enter physical cash count in drawer to calculate variance
             </p>
 
+            {pendingSignOut && (
+              <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800">
+                Your sign-out is waiting on this shift. Count the drawer and complete the
+                closing to sign out.
+              </div>
+            )}
+
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1 text-xs text-slate-600 mb-4">
               <div className="flex justify-between">
                 <span>Opening Cash:</span>
@@ -1706,16 +1919,21 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setShowCloseShiftModal(false)}
+                onClick={() => {
+                  setShowCloseShiftModal(false);
+                  // Dismissing the prompt means "stay signed in" — drop the
+                  // held request so App does not sign them out later.
+                  if (pendingSignOut) onCancelSignOut?.();
+                }}
                 className="flex-1 py-2.5 rounded-xl border border-slate-200 font-bold text-xs text-slate-600"
               >
-                Cancel
+                {pendingSignOut ? 'Keep Working' : 'Cancel'}
               </button>
               <button
                 type="submit"
                 className="flex-1 py-2.5 rounded-xl bg-[#F28C28] hover:bg-orange-600 text-white font-extrabold text-xs shadow-md"
               >
-                Complete Shift Closing
+                {pendingSignOut ? 'Close Shift & Sign Out' : 'Complete Shift Closing'}
               </button>
             </div>
           </form>

@@ -64,3 +64,21 @@ test('buildCustomerDisplayState for an empty cart projects no lines', () => {
   assert.deepEqual(state.items, []);
   assert.equal(state.totalAmount, 0);
 });
+
+test('buildCustomerDisplayState carries the shop photo to the customer screen', () => {
+  const logo = 'data:image/jpeg;base64,dGVzdA==';
+  assert.equal(buildCustomerDisplayState('Zen Mart', [], 0, logo).tenantLogo, logo);
+
+  // No photo → the key is absent rather than an empty string, so the display
+  // keeps its branded placeholder instead of rendering a broken <img>.
+  const plain = buildCustomerDisplayState('Zen Mart', [], 0);
+  assert.equal('tenantLogo' in plain, false);
+  assert.equal(buildCustomerDisplayState('Zen Mart', [], 0, '').tenantLogo, undefined);
+
+  // The projection still leaks nothing internal — the logo is the only tenant
+  // field that crosses the channel alongside the name.
+  const serialized = JSON.stringify(plain);
+  for (const forbidden of ['cost_price', 'tenant_id', 'barcode', 'logo_url']) {
+    assert.equal(serialized.includes(forbidden), false, `leaked ${forbidden}`);
+  }
+});

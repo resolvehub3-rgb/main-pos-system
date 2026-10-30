@@ -43,7 +43,7 @@
  *
  * Returns whether the store changed, so the caller can persist and notify.
  */
-import { bindMirrorId } from './sync.ts';
+import { bindMirrorId, toUuid } from './sync.ts';
 
 export function applyRealtimeRow<T extends { id: string }>(
   store: T[],
@@ -52,7 +52,18 @@ export function applyRealtimeRow<T extends { id: string }>(
   raw: Record<string, unknown> | undefined,
   wrap: (row: Record<string, unknown>) => T,
 ): boolean {
-  const heldIndex = resolvedId ? store.findIndex((row) => row.id === resolvedId) : -1;
+  let heldIndex = resolvedId ? store.findIndex((row) => row.id === resolvedId) : -1;
+
+  // Identity fallback for an unresolved echo: the payload is keyed by the
+  // database UUID, and a row held under the app id that produced it is the
+  // SAME row even when this session never registered the binding (rows that
+  // arrived through the `storage` event used to bind nothing — see
+  // `hydrateIdentities`). Without this the echo is adopted as an unknown
+  // record: the twin that shows a product twice and trips the
+  // duplicate-barcode guard against the product's own barcode.
+  if (heldIndex === -1 && !resolvedId && raw && typeof raw.id === 'string' && raw.id) {
+    heldIndex = store.findIndex((row) => row.id && toUuid(row.id) === raw.id);
+  }
 
   if (eventType === 'DELETE') {
     // A DELETE payload carries only `old` (the id) — there is no `new` row,
@@ -67,7 +78,9 @@ export function applyRealtimeRow<T extends { id: string }>(
   if (heldIndex !== -1) {
     if (eventType !== 'UPDATE') return false;
     const existing = store[heldIndex];
-    const next = wrap({ ...existing, ...raw, id: resolvedId }) as Record<string, unknown>;
+    // Keep the held row's own id. When the row was matched through the
+    // identity fallback, `resolvedId` is null — passing it would blank the id.
+    const next = wrap({ ...existing, ...raw, id: existing.id }) as Record<string, unknown>;
     for (const key of Object.keys(existing)) {
       if (!(key in next)) next[key] = (existing as Record<string, unknown>)[key];
     }

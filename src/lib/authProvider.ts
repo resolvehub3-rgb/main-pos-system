@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { UserAccount, UserRole } from '../types/index.ts';
+import { attemptsLeftMessage, lockoutMessage, PIN_LOCKOUT_MS } from './pinAuth.ts';
 
 /**
  * Supabase Auth adapter for the POS.
@@ -128,6 +129,317 @@ export async function signInWithSupabase(
     return { ok: false, message: 'Sign-in succeeded but no user was returned. Please try again.' };
   }
   return { ok: true, user: { id: user.id, email: user.email, user_metadata: user.user_metadata } };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Cashier PIN verification (server-side)                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Outcome of `verify_cashier_pin`, the RPC run by the sign-in screen.
+ *
+ * `'no_pin'` / `'no_user'` are not failures: they mean the backend has no PIN
+ * hash for this cashier yet (created offline, write still queued), so the
+ * caller falls back to the salted hash the till already holds — that fallback
+ * is the offline half of "backend + offline fallback" and it verifies the same
+ * PIN the owner assigned.
+ *
+ * `'unavailable'` covers a network outage and a database that has not had the
+ * PIN migration applied yet; it too falls back to the device hash rather than
+ * locking cashiers out of their own till.
+ */
+export type CashierPinVerifyResult =
+  | { status: 'ok'; user: UserAccount }
+  | { status: 'invalid'; attemptsLeft: number; message: string }
+  | { status: 'locked'; retryAfterMs: number; message: string }
+  | { status: 'inactive'; message: string }
+  | { status: 'no_pin' | 'no_user' }
+  | { status: 'unavailable'; message: string };
+
+/** Build the application user the verifier hands back on a correct PIN. */
+function pinUserFromPayload(payload: Record<string, unknown>): UserAccount | null {
+  const id = payload.id;
+  if (typeof id !== 'string' || !id) return null;
+  return {
+    id,
+    tenant_id: typeof payload.tenant_id === 'string' ? payload.tenant_id : undefined,
+    shop_name: typeof payload.shop_name === 'string' ? payload.shop_name : undefined,
+    full_name: typeof payload.full_name === 'string' ? payload.full_name : '',
+    email: typeof payload.email === 'string' ? payload.email : '',
+    phone: typeof payload.phone === 'string' ? payload.phone : '',
+    // The verifier only ever returns a cashier (SQL enforces role = 'cashier');
+    // the default keeps an unexpected payload from minting a privileged role.
+    role: payload.role === 'shop_owner' || payload.role === 'super_admin' ? payload.role : 'cashier',
+    is_active: payload.is_active !== false,
+    created_at:
+      typeof payload.created_at === 'string' ? payload.created_at : new Date().toISOString(),
+  };
+}
+
+/**
+ * Verify a cashier's PIN against the backend (`public.cashier_pins`, bcrypt).
+ *
+ * Returns a status word instead of throwing: the caller decides between
+ * opening the session, counting the attempt, honouring the lockout, and the
+ * offline fallback. The hash itself is never returned to the client.
+ */
+export async function verifyCashierPinWithSupabase(
+  client: SupabaseAuthClient,
+  params: { tenantId: string; userId: string; pin: string }
+): Promise<CashierPinVerifyResult> {
+  let payload: unknown;
+  let error: { message: string } | null = null;
+  try {
+    ({ data: payload, error } = await client.rpc('verify_cashier_pin', {
+      p_tenant_id: params.tenantId,
+      p_user_id: params.userId,
+      p_pin: params.pin,
+    }));
+  } catch (err) {
+    // fetch rejection (offline) — the till falls back to its local hash.
+    return { status: 'unavailable', message: err instanceof Error ? err.message : String(err) };
+  }
+  if (error) {
+    return { status: 'unavailable', message: error.message };
+  }
+
+  const data = (payload ?? {}) as Record<string, unknown>;
+  switch (data.status) {
+    case 'ok': {
+      const user = pinUserFromPayload(data);
+      return user ? { status: 'ok', user } : { status: 'unavailable', message: 'Verifier returned no user.' };
+    }
+    case 'invalid': {
+      const attemptsLeft = typeof data.attempts_left === 'number' ? data.attempts_left : 0;
+      return { status: 'invalid', attemptsLeft, message: attemptsLeftMessage(attemptsLeft) };
+    }
+    case 'locked': {
+      const retryAfterMs =
+        typeof data.retry_after === 'number' ? Math.max(0, data.retry_after) * 1000 : PIN_LOCKOUT_MS;
+      return { status: 'locked', retryAfterMs, message: lockoutMessage(retryAfterMs) };
+    }
+    case 'inactive':
+      return {
+        status: 'inactive',
+        message: 'This cashier account has been deactivated. Please contact your shop owner.',
+      };
+    case 'no_pin':
+    case 'no_user':
+      return { status: data.status };
+    default:
+      return { status: 'unavailable', message: 'Verifier returned an unexpected response.' };
+  }
+}
+
+/** Result of `set_cashier_pin`; `retryLater` marks "queue and try again". */
+export type CashierPinSetResult =
+  | { ok: true }
+  | { ok: false; message: string; retryLater?: boolean };
+
+/**
+ * Ask the backend to store (or reset) a cashier's bcrypt PIN hash.
+ *
+ * Called by the owner while managing staff. A `retryLater` failure means the
+ * database could not take the write right now (offline, migration pending, or
+ * the cashier's roster row has not synced) — the caller keeps the device-local
+ * hash and queues this call so the backend catches up instead of rejecting the
+ * new PIN later.
+ */
+export async function setCashierPinWithSupabase(
+  client: SupabaseAuthClient,
+  params: { tenantId: string; userId: string; pin: string }
+): Promise<CashierPinSetResult> {
+  let payload: unknown;
+  let error: { message: string } | null = null;
+  try {
+    ({ data: payload, error } = await client.rpc('set_cashier_pin', {
+      p_tenant_id: params.tenantId,
+      p_user_id: params.userId,
+      p_pin: params.pin,
+    }));
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : String(err),
+      retryLater: true,
+    };
+  }
+  if (error) return { ok: false, message: error.message, retryLater: true };
+
+  const status = (payload as { status?: string } | null)?.status;
+  switch (status) {
+    case 'ok':
+      return { ok: true };
+    case 'no_user':
+      return {
+        ok: false,
+        message: 'This cashier has not synced to the shop database yet.',
+        retryLater: true,
+      };
+    case 'forbidden':
+      return { ok: false, message: 'Only this shop’s owner can assign a cashier PIN.' };
+    case 'not_cashier':
+      return { ok: false, message: 'A sign-in PIN applies to cashier accounts only.' };
+    case 'invalid_pin':
+      return { ok: false, message: 'PIN must be 4 to 6 digits.' };
+    default:
+      return {
+        ok: false,
+        message: 'The shop database returned an unexpected response.',
+        retryLater: true,
+      };
+  }
+}
+
+export interface StaffProvisionClient {
+  functions: {
+    invoke(
+      name: string,
+      options: { body: Record<string, string> }
+    ): PromiseLike<{
+      data: unknown;
+      error: { message: string; context?: unknown } | null;
+    }>;
+  };
+}
+
+export type StaffProvisionResult =
+  | { ok: true; userId: string }
+  | { ok: false; message: string };
+
+/**
+ * The SDK text for a request that never produced an HTTP response.
+ *
+ * `FunctionsFetchError` means `fetch` itself rejected: no connection, a
+ * blocked request, or a CORS preflight the browser refused. That last one is
+ * what an undeployed function looks like from the browser — the gateway's
+ * fallback 404 does not include `content-type` in `Access-Control-Allow-
+ * Headers`, so the preflight for our JSON POST fails and `fetch` rejects
+ * instead of ever handing back the 404.
+ */
+const FUNCTIONS_FETCH_ERROR = 'Failed to send a request to the Edge Function';
+
+/** Shown when the gateway answers 404 because the function was never deployed. */
+const STAFF_FUNCTION_NOT_DEPLOYED_MESSAGE =
+  'Could not create the staff login: the staff provisioning service is not deployed ' +
+  'for this Supabase project. From the repository root run ' +
+  '`supabase functions deploy provision-staff`, then retry.';
+
+/** Shown when the request never reached the Edge Function at all. */
+const STAFF_FUNCTION_UNREACHABLE_MESSAGE =
+  'Could not create the staff login: the provisioning service could not be reached. ' +
+  'Check your connection and retry. If it keeps failing, the `provision-staff` Edge ' +
+  'Function is not deployed for this Supabase project — run ' +
+  '`supabase functions deploy provision-staff`, then retry.';
+
+/** Shown when the gateway refuses the token before the function even runs. */
+const STAFF_SESSION_EXPIRED_MESSAGE =
+  'Could not create the staff login: your sign-in has expired. Sign in again and retry.';
+
+/**
+ * Turn a `functions.invoke` failure into the message shown to the owner.
+ *
+ * Mirrors `formatProvisionError`: raw transport text ("Failed to send a
+ * request to the Edge Function", "Requested function was not found",
+ * "Invalid JWT") names an SDK or gateway internal and tells the operator
+ * nothing about the fix, so the three conditions that made staff creation look
+ * broken are translated into the action that repairs them. Everything else
+ * passes through unchanged — the function's own messages ("Only this shop's
+ * owner can add staff.") are already written for the reader.
+ */
+export async function formatStaffProvisionError(
+  error: { message: string; context?: unknown }
+): Promise<string> {
+  const context = error.context;
+  if (context instanceof Response) {
+    try {
+      const body: unknown = await context.clone().json();
+      if (
+        typeof body === 'object' &&
+        body !== null &&
+        'message' in body &&
+        typeof body.message === 'string'
+      ) {
+        const message = body.message;
+        const code = 'code' in body ? (body as { code?: unknown }).code : undefined;
+        const notDeployed =
+          code === 'NOT_FOUND' ||
+          /(?:requested )?function (?:was )?not found|cannot find function/i.test(message);
+        if (notDeployed) return STAFF_FUNCTION_NOT_DEPLOYED_MESSAGE;
+        // With `verify_jwt` on, the gateway rejects an absent or malformed
+        // token before the function runs, so those `UNAUTHORIZED_*` codes are
+        // the one auth failure the function's own 401s never cover.
+        if (typeof code === 'string' && code.startsWith('UNAUTHORIZED')) {
+          return STAFF_SESSION_EXPIRED_MESSAGE;
+        }
+        return message;
+      }
+    } catch {
+      // A non-JSON response falls back to the SDK's explicit error message.
+    }
+  }
+  if (error.message.includes(FUNCTIONS_FETCH_ERROR)) return STAFF_FUNCTION_UNREACHABLE_MESSAGE;
+  return `Could not create the staff login: ${error.message}`;
+}
+
+/**
+ * Provision a login through the trusted server-side Admin API function.
+ *
+ * A browser client cannot create Supabase Auth users with the shop owner's
+ * session. The function verifies the owner, creates the Auth identity, then
+ * links its UUID to the shop roster and membership before returning success.
+ */
+export async function provisionStaffWithSupabase(
+  client: StaffProvisionClient,
+  params: {
+    tenantId: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    password: string;
+    role: 'cashier' | 'shop_owner';
+  }
+): Promise<StaffProvisionResult> {
+  let data: unknown;
+  let error: { message: string; context?: unknown } | null = null;
+  try {
+    ({ data, error } = await client.functions.invoke('provision-staff', {
+      body: {
+        tenant_id: params.tenantId,
+        full_name: params.fullName,
+        email: params.email,
+        phone: params.phone,
+        password: params.password,
+        role: params.role,
+      },
+    }));
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error
+        ? `Could not reach the staff provisioning service: ${err.message}`
+        : 'Could not reach the staff provisioning service. Check your connection and try again.',
+    };
+  }
+
+  if (error) {
+    return { ok: false, message: await formatStaffProvisionError(error) };
+  }
+
+  const userId =
+    typeof data === 'object' &&
+    data !== null &&
+    'user_id' in data &&
+    typeof data.user_id === 'string'
+      ? data.user_id
+      : '';
+  if (!userId) {
+    return {
+      ok: false,
+      message: 'The staff provisioning service returned no account ID. The cashier was not added.',
+    };
+  }
+  return { ok: true, userId };
 }
 
 /** Result of the trusted online new-shop provisioning flow. */

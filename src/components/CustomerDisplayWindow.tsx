@@ -16,7 +16,9 @@ import type {CustomerDisplayState} from '../types';
  *  - live-updates on every scan/quantity change/removal/sale completion the
  *    cashier publishes over BroadcastChannel (src/lib/customerDisplayChannel),
  *  - shows the existing welcome screen while no sale is active,
- *  - closes its own window when the operator clicks the X.
+ *  - has NO close (X) button: this is the customer's screen, so only the
+ *    operator closes it, with the popup window's own close control (the
+ *    cashier window notices via its `popup.closed` poll).
  *
  * It deliberately imports no database, auth or business logic — the cashier
  * window stays the single source of truth for the cart.
@@ -37,9 +39,9 @@ export const CustomerDisplayWindow: React.FC = () => {
   return (
     <CustomerDisplayModal
       tenantName={state?.tenantName || 'SamTill POS'}
+      tenantLogo={state?.tenantLogo}
       items={state?.items ?? []}
       totalAmount={state?.totalAmount ?? 0}
-      onClose={() => window.close()}
     />
   );
 };

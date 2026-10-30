@@ -24,15 +24,18 @@ export function cartToCustomerItems(cart: CartItem[]): CustomerDisplayItem[] {
  *
  * `totalAmount` comes from `calculateCartTotals` in the cashier (it already
  * includes line discounts), so the display shows the same amount due the
- * cashier's checkout panel shows.
+ * cashier's checkout panel shows. `tenantLogo` is optional: a shop that has
+ * never uploaded a photo omits it and the screen keeps its branded icon.
  */
 export function buildCustomerDisplayState(
   tenantName: string,
   cart: CartItem[],
   totalAmount: number,
+  tenantLogo?: string,
 ): CustomerDisplayState {
   return {
     tenantName,
+    ...(tenantLogo ? { tenantLogo } : {}),
     items: cartToCustomerItems(cart),
     totalAmount,
   };

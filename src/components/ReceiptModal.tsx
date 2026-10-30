@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Printer, X, CheckCircle2, ShoppingCart } from 'lucide-react';
 import { formatGHS } from '../lib/money';
 import { printSaleReceipt } from '../lib/printBridge';
+import { receiptFooterText } from '../lib/receiptFooter';
 import { Sale, Tenant } from '../types';
 
 interface ReceiptModalProps {
@@ -39,6 +40,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, tenant, onClos
 
   /** Renders as the visible preview rather than the off-screen print copy. */
   const showAsDialog = !autoPrint || autoFailed;
+
+  /** Owner-edited receipt footer, already trimmed; `''` = no note at all. */
+  const footerNote = receiptFooterText(tenant).trim();
 
   /**
    * Send the receipt to paper. Resolves true when paper was requested.
@@ -214,10 +218,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, tenant, onClos
               )}
             </div>
 
-            {/* Footer Notice */}
+            {/* Footer Notice — the owner's Receipt Footer Note, live from the tenant */}
             <div className="pt-2 text-center text-[9px] text-slate-500 border-t border-dashed border-slate-400 leading-tight">
-              <p className="font-bold text-slate-700">Thank you for shopping with us!</p>
-              <p className="mt-0.5">Goods sold are returnable within 48h with receipt.</p>
+              {footerNote && <p className="font-bold text-slate-700">{footerNote}</p>}
               <p className="mt-1 font-semibold text-slate-400">Powered by SamTill POS 🇬🇭</p>
             </div>
           </div>

@@ -214,6 +214,26 @@ test('adoptTenant maps the schema-only subscription state onto the union', () =>
   assert.equal(adoptTenant({ ...base, is_active: false }).is_active, false);
 });
 
+test('adoptTenant keeps an unedited receipt footer apart from a cleared one', () => {
+  const row = { id: 't1', name: 'Zen Shop Mart', slug: 'zen-shop-mart' };
+
+  // The column is NULL on a shop that never opened Store Settings: the app
+  // must fall back to its built-in note, so this has to read as `undefined`.
+  assert.equal(adoptTenant({ ...row, receipt_footer: null }).receipt_footer, undefined);
+  assert.equal(adoptTenant(row).receipt_footer, undefined);
+
+  // Cleared by the owner: an explicit empty string must survive, otherwise the
+  // default note would print again after they removed it.
+  assert.equal(adoptTenant({ ...row, receipt_footer: '' }).receipt_footer, '');
+
+  // And the text they typed comes back verbatim — this is what every open
+  // till renders once the realtime payload folds in.
+  assert.equal(
+    adoptTenant({ ...row, receipt_footer: 'Goods returnable within 48h.' }).receipt_footer,
+    'Goods returnable within 48h.',
+  );
+});
+
 test('adoptBranch defaults the flags the way the till expects', () => {
   const branch = adoptBranch({
     id: 'b1',

@@ -223,7 +223,14 @@ attaching the wrong tenant or role.
 
 ### 4.4 Recovery & re-invitation
 - **Forgot password** → Auth email flow (Resend/SMTP). No human handling a password.
-- **Staff re-invite** → shop owner triggers a new invite from the dashboard (server-side Admin API call). The old account stays deactivated until the invite is accepted, so a shop is never stranded.
+- **Staff creation** → the shop owner's authenticated dashboard calls the
+  `provision-staff` Edge Function. It verifies the owner's active membership,
+  creates the Auth identity with the password supplied by the owner, and uses
+  `invite_staff` plus the owner-scoped roster policy to attach the Auth UUID to
+  the shop. The password is never written to `public.users` or the online
+  device mirror. The function must be deployed to the same Supabase project as
+  the POS app. The owner is responsible for sharing the cashier's initial
+  password through a secure channel.
 - **Disabled users** → `is_active=false` in `profiles`; Auth sign-in is refused (already tested client-side; enforced server-side by RLS + the deactivated check).
 
 ## 5. Stage C — credential-rotation runbook (NOT YET EXECUTED)

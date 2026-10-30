@@ -46,3 +46,31 @@ export function canViewCostDetails(user: UserAccount | null, tenantId: string): 
 export function canAdjustStock(user: UserAccount | null, tenantId: string): boolean {
   return isActiveOwner(user, tenantId);
 }
+
+/**
+ * Product catalogue management: registering products, capturing their real
+ * barcodes, editing prices / barcode assignments.
+ *
+ * The Add / Edit product screens are only mounted for the shop owner, but the
+ * check is also applied inside the modals themselves so a cashier session can
+ * never register products or reassign barcodes even if it reached them.
+ * Super Admin is allowed as the platform support path (mirrors the dead
+ * `onAddShop` prop on the super-admin dashboard).
+ */
+export function canManageProducts(user: UserAccount | null, tenantId: string): boolean {
+  if (!user || !user.is_active) return false;
+  if (user.role === 'super_admin') return true;
+  return isActiveOwner(user, tenantId);
+}
+
+/**
+ * Editing the store profile every receipt is printed from (legal name,
+ * receipt address, phone, footer note).
+ *
+ * This is shop-wide configuration rather than per-till state, so it is owner-
+ * only exactly like category management — a cashier session must not be able
+ * to rewrite the name on the shop's invoices.
+ */
+export function canManageStoreProfile(user: UserAccount | null, tenantId: string): boolean {
+  return isActiveOwner(user, tenantId);
+}

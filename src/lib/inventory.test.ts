@@ -257,6 +257,9 @@ test('checkout deducts stock exactly once and creates one sale movement per item
 
   const movementsBefore = db.getInventoryMovements(tenantA.id).length;
 
+  // Sales only run against an open shift.
+  db.openShift(tenantA.id, 'branch-main', ownerA.id, ownerA.full_name, 100);
+
   const sale = db.processSale({
     tenant_id: tenantA.id,
     branch_id: 'branch-main',
@@ -300,6 +303,9 @@ test('refunds restore stock with a refund movement', () => {
   const { tenantA, ownerA } = setup();
   db.setCurrentUser(ownerA);
   const product = addProductTo(tenantA.id, { stock_quantity: 20 });
+
+  // Sales only run against an open shift.
+  db.openShift(tenantA.id, 'branch-main', ownerA.id, ownerA.full_name, 100);
 
   const sale = db.processSale({
     tenant_id: tenantA.id,
@@ -436,6 +442,8 @@ test('getStockBook is restricted to the shop owner and reconciles with the ledge
     quantity: 10,
     unit_cost: 20,
   });
+  // Sales only run against an open shift.
+  db.openShift(tenantA.id, 'branch-main', ownerA.id, ownerA.full_name, 100);
   db.processSale({
     tenant_id: tenantA.id,
     branch_id: 'branch-main',

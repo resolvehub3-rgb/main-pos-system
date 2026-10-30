@@ -12,6 +12,7 @@
  * browser (checkout flow) and in Node (tests / print bridge).
  */
 import type { Sale, Tenant } from '../types';
+import { receiptFooterText } from './receiptFooter';
 
 /** Printable paper width in millimetres. Drives the column count. */
 export type PaperWidth = 58 | 80;
@@ -311,12 +312,13 @@ export function buildReceiptBytes(
   if (details?.card_reference) kvLine(emit, 'Card Ref:', details.card_reference, columns);
 
   /* --- Footer ------------------------------------------------------------ */
+  // The owner's Receipt Footer Note, read off the tenant so a change saved in
+  // Store Settings prints on the next receipt without touching this file.
+  // `''` means the owner cleared the note deliberately — no line, not the
+  // default one (see src/lib/receiptFooter.ts).
+  const footerNote = receiptFooterText(tenant).trim();
   rule(emit, columns);
-  for (const text of [
-    'Thank you for shopping with us!',
-    'Goods sold are returnable within 48h with receipt.',
-    'Powered by SamTill POS',
-  ]) {
+  for (const text of [footerNote, 'Powered by SamTill POS'].filter(Boolean)) {
     for (const line of wrapText(text, columns)) {
       emitTextLine(emit, line, columns, { center: true });
     }

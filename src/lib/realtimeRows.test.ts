@@ -141,3 +141,24 @@ test('an unknown update is adopted; a payload without an id is ignored', () => {
   assert.equal(applyRealtimeRow(store, 'UPDATE', 'sale-unknown', undefined, adoptSale), false);
   assert.equal(store.length, 1);
 });
+
+test('an unresolved echo of a held app-id row updates it in place and keeps its id', () => {
+  // This is the mirror-twin scenario: the binding was never registered
+  // (the row arrived via the `storage` event), so `resolvedId` is null and
+  // the payload is keyed by the database UUID of the held row's own app id.
+  const sale = heldSale();
+  const store: Sale[] = [sale];
+
+  const changed = applyRealtimeRow(
+    store,
+    'UPDATE',
+    null, // unresolved — the identity fallback has to kick in
+    { ...serverSale, id: toUuid(sale.id), status: 'refunded' },
+    adoptSale,
+  );
+
+  assert.equal(changed, true);
+  assert.equal(store.length, 1); // not adopted as a second row
+  assert.equal(store[0].id, sale.id); // id preserved, never blanked to null
+  assert.equal(store[0].status, 'refunded'); // the update actually landed
+});

@@ -3,7 +3,7 @@ import App from './App.tsx';
 import LandingApp from '../landing/src/App.tsx';
 import {CustomerDisplayWindow} from './components/CustomerDisplayWindow.tsx';
 import {SplashScreen} from './components/SplashScreen.tsx';
-import {initInstallPrompt, registerServiceWorker} from './lib/pwa.ts';
+import {applyStandaloneTitle, initInstallPrompt, registerServiceWorker} from './lib/pwa.ts';
 import {isAuthEntryPath, WORKSPACE_PATHS} from './lib/roleRoute.ts';
 import './index.css';
 import '../landing/src/index.css';
@@ -21,10 +21,13 @@ import '../landing/src/index.css';
  *
  * PWA plumbing: the service worker is registered once (production only) and
  * the browser install prompt is captured so the header can offer a real
- * "Install app" button (src/lib/pwa.ts).
+ * "Install app" button (src/lib/pwa.ts). When running as an installed app,
+ * the window title is shortened to "SamTill POS" before first render so the
+ * standalone title bar shows the app name instead of the SEO page title.
  */
 registerServiceWorker();
 initInstallPrompt();
+applyStandaloneTitle();
 
 const isCustomerDisplayView =
   typeof window !== 'undefined' &&
@@ -39,7 +42,7 @@ const isPosRoute =
 createRoot(document.getElementById('root')!).render(
   isCustomerDisplayView ? <CustomerDisplayWindow /> : isPosRoute ? (
     <>
-      <App initialAuthTab={window.location.pathname === '/register' ? 'register' : 'login'} />
+      <App />
       <SplashScreen />
     </>
   ) : (

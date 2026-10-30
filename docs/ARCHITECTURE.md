@@ -7,7 +7,7 @@ SamTill POS is a production-ready, multi-tenant supermarket and retail POS SaaS 
 1. **Frontend**: Vite + React 19 + TypeScript + Tailwind CSS
    - Responsive layouts for Desktop, Tablet, and Mobile Cashier Tills
    - Real-time updates via Supabase Realtime WebSocket subscriptions
-   - Barcode Scanner integration (USB/Bluetooth HID emulation)
+   - Barcode Scanner integration (USB/Bluetooth HID emulation at the till; webcam / phone-camera capture during product registration via the locally bundled ZXing decoder — no network needed)
    - Printable Thermal Receipt Generator (58mm / 80mm)
    - Offline IndexedDB caching with synchronization queue
 2. **Database & Storage**: Supabase (PostgreSQL 15+)

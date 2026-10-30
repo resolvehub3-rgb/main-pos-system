@@ -23,6 +23,22 @@ export function isStandalone(): boolean {
   );
 }
 
+/**
+ * Give the installed app window a short, native-feeling title.
+ *
+ * An installed PWA's title bar renders `document.title` (the <title> element),
+ * which for SamTill is the long SEO title used by the browser tab. In the
+ * standalone window that long string is just noise where a desktop app would
+ * show its name, so — only when actually running installed — we swap it for
+ * the manifest's app name. A normal browser tab (and its SEO title) is
+ * untouched, and nothing is ever covered or faked: this is the app's own
+ * document title, not browser chrome.
+ */
+export function applyStandaloneTitle(): void {
+  if (typeof document === 'undefined') return;
+  if (isStandalone()) document.title = 'SamTill POS';
+}
+
 /* -------------------------------------------------------------------------- */
 /* Service worker registration                                                */
 /* -------------------------------------------------------------------------- */

@@ -5,6 +5,7 @@ import {
   classifySignInError,
   ensureOwnerShop,
   formatProvisionError,
+  provisionStaffWithSupabase,
   resolveAuthUser,
   signInWithSupabase,
   signOutSupabase,
@@ -439,6 +440,162 @@ test('a missing provisioning migration is reported as the fix, not PostgREST jar
     message: 'Could not find the function public.create_tenant_with_owner without parameters',
   });
   assert.match(again, /pending migrations/i);
+});
+
+test('staff provisioning uses the trusted function and returns its Auth UUID', async () => {
+  let invocation: { name: string; body: Record<string, string> } | undefined;
+  const result = await provisionStaffWithSupabase(
+    {
+      functions: {
+        invoke: async (name, options) => {
+          invocation = { name, body: options.body };
+          return { data: { user_id: uid }, error: null };
+        },
+      },
+    },
+    {
+      tenantId: 'tenant-uuid',
+      fullName: 'Kojo Antwi',
+      email: 'kojo@example.com',
+      phone: '024',
+      password: 'secure-password',
+      role: 'cashier',
+    },
+  );
+
+  assert.deepEqual(result, { ok: true, userId: uid });
+  assert.equal(invocation?.name, 'provision-staff');
+  assert.deepEqual(invocation?.body, {
+    tenant_id: 'tenant-uuid',
+    full_name: 'Kojo Antwi',
+    email: 'kojo@example.com',
+    phone: '024',
+    password: 'secure-password',
+    role: 'cashier',
+  });
+});
+
+test('staff provisioning surfaces backend failure without reporting success', async () => {
+  const result = await provisionStaffWithSupabase(
+    {
+      functions: {
+        invoke: async () => ({
+          data: null,
+          error: {
+            message: 'Edge Function returned a non-2xx status code',
+            context: new Response(JSON.stringify({ message: 'Only this shop’s owner can add staff.' })),
+          },
+        }),
+      },
+    },
+    {
+      tenantId: 'tenant-uuid',
+      fullName: 'Kojo Antwi',
+      email: 'kojo@example.com',
+      phone: '',
+      password: 'secure-password',
+      role: 'cashier',
+    },
+  );
+
+  assert.deepEqual(result, { ok: false, message: 'Only this shop’s owner can add staff.' });
+});
+
+test('staff provisioning translates the unreachable-Edge-Function text into the deploy fix', async () => {
+  const result = await provisionStaffWithSupabase(
+    {
+      functions: {
+        invoke: async () => ({
+          data: null,
+          error: { message: 'Failed to send a request to the Edge Function' },
+        }),
+      },
+    },
+    {
+      tenantId: 'tenant-uuid',
+      fullName: 'Kojo Antwi',
+      email: 'kojo@example.com',
+      phone: '',
+      password: 'secure-password',
+      role: 'cashier',
+    },
+  );
+
+  assert.equal(result.ok, false);
+  const message = (result as any).message as string;
+  assert.match(message, /provision-staff/);
+  assert.match(message, /supabase functions deploy/);
+  assert.ok(
+    !message.includes('Failed to send a request to the Edge Function'),
+    'the raw SDK text must not leak to the shop owner',
+  );
+});
+
+test('staff provisioning names the missing Edge Function when the gateway answers 404', async () => {
+  const result = await provisionStaffWithSupabase(
+    {
+      functions: {
+        invoke: async () => ({
+          data: null,
+          error: {
+            message: 'Edge Function returned a non-2xx status code',
+            context: new Response(
+              JSON.stringify({ code: 'NOT_FOUND', message: 'Requested function was not found' }),
+              { status: 404, headers: { 'Content-Type': 'application/json' } },
+            ),
+          },
+        }),
+      },
+    },
+    {
+      tenantId: 'tenant-uuid',
+      fullName: 'Kojo Antwi',
+      email: 'kojo@example.com',
+      phone: '',
+      password: 'secure-password',
+      role: 'cashier',
+    },
+  );
+
+  assert.equal(result.ok, false);
+  const message = (result as any).message as string;
+  assert.match(message, /supabase functions deploy provision-staff/);
+  assert.ok(
+    !message.includes('Requested function was not found'),
+    'the gateway text must not leak to the shop owner',
+  );
+});
+
+test('staff provisioning turns a gateway token rejection into a sign-in prompt', async () => {
+  const result = await provisionStaffWithSupabase(
+    {
+      functions: {
+        invoke: async () => ({
+          data: null,
+          error: {
+            message: 'Edge Function returned a non-2xx status code',
+            context: new Response(
+              JSON.stringify({ code: 'UNAUTHORIZED_NO_AUTH_HEADER', message: 'Missing authorization header' }),
+              { status: 401, headers: { 'Content-Type': 'application/json' } },
+            ),
+          },
+        }),
+      },
+    },
+    {
+      tenantId: 'tenant-uuid',
+      fullName: 'Kojo Antwi',
+      email: 'kojo@example.com',
+      phone: '',
+      password: 'secure-password',
+      role: 'cashier',
+    },
+  );
+
+  assert.equal(result.ok, false);
+  const message = (result as any).message as string;
+  assert.match(message, /sign-in has expired/i);
+  assert.ok(!message.includes('authorization header'), 'gateway internals must not leak');
 });
 
 test('signUpAndProvisionShop classifies a duplicate-email sign-up', async () => {

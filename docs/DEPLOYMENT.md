@@ -12,6 +12,20 @@
 6. The first super admin is provisioned server-side via the Supabase Admin API
    with the service-role key. **No super-admin credential is ever placed in a
    `VITE_` variable or in this repository.**
+7. Deploy the staff-provisioning Edge Function from the repository root:
+   `supabase functions deploy provision-staff --project-ref <project-ref>`.
+   It uses Supabase's server-side `SUPABASE_SERVICE_ROLE_KEY` to create cashier
+   Auth accounts; never add that key to the POS app or a `VITE_` variable.
+   Apply `20261030000001_provisioning_rpc.sql` first, since the function calls
+   the owner-checked `invite_staff` RPC.
+   - **Symptom when this step was skipped:** adding a cashier fails with
+     *"Could not create the staff login: Failed to send a request to the Edge
+     Function"*. The browser's preflight gets the gateway's fallback 404, which
+     omits `content-type` from `Access-Control-Allow-Headers`, so the request
+     never returns a response to the app. Check with
+     `curl -X OPTIONS https://<project-ref>.supabase.co/functions/v1/provision-staff`
+     — `{"code":"NOT_FOUND","message":"Requested function was not found"}`
+     means the deploy command above still has to be run.
 
 ## 2. Vercel Deployment (web app + PWA)
 
@@ -30,6 +44,12 @@ install it from the browser (Install app / Add to Home Screen).
    service workers and the install prompt require a secure context.
 5. The PWA service worker (`public/sw.js`) is served from the site root with
    scope `/`; keep it deployable at `/sw.js` (no header rules may block it).
+
+Shop owners add a staff member's login from **Staff → Add Cashier**. The
+provisioning function creates the Supabase Auth account and shop membership
+before the dashboard confirms success, so the cashier can sign in on another
+till with the email and password supplied by the owner. This function must be
+deployed to the same Supabase project as the POS app.
 
 The marketing site (`landing/`) is a separate Vercel project with its own
 `/api/*` serverless functions — see `landing/README.md`.
@@ -97,3 +117,48 @@ in-app "Install app" button shows the right instructions per platform).
   can be placed on the customer monitor manually; browsers do not offer
   Electron-style multi-window startup positioning, background services or
   automatic kiosk locking.
+
+### Windows 10/11 — installed PWA chrome and limitations
+
+SamTill has no desktop wrapper or installer. Its manifest requests
+`display: "standalone"` and the app is served at `/`; the `/login`,
+`/register`, `/admin`, `/shop-owner`, and `/cashier` routes are all inside that
+same app scope. The installed app therefore uses the same standalone display
+mode for each of those routes. The manifest does **not** request Window
+Controls Overlay (WCO).
+
+**Windows 11 / Edge verification:** the running installed SamTill window
+showed the Shop Owner dashboard and the title `SamTill POS`. Its accessible
+native controls were **Minimize**, **Restore**, **Close**, **Zoom: 80%**, and
+**Settings and more (Alt+F)**. The password-manager key icon was not present
+in the inspected app window. The zoom control reflects this Edge profile's
+80% page zoom; it is browser UI, not an app element or manifest option. To
+reset the page zoom on a till PC, focus the app and press **Ctrl+0**. This
+profile was not changed during verification.
+
+The Edge **Settings and more** app-menu control remains in the installed
+window. It is browser-owned and cannot be removed by SamTill CSS, JavaScript,
+or a manifest option. Microsoft's
+[Window Controls Overlay documentation](https://learn.microsoft.com/en-us/microsoft-edge/progressive-web-apps/how-to/window-controls-overlay)
+also identifies **App Info** alongside the system window controls when WCO
+hides the title bar. WCO is not enabled here and would not remove that
+browser control. The Windows minimize, maximize/restore, and close controls
+remain available and are not covered or replaced.
+
+The Shop Owner route was visually inspected in the installed window. The
+other role routes share the same origin and manifest scope, but were not
+separately opened because no safe test accounts for those roles were
+available. The customer display is opened with `window.open(..., "popup=yes")`
+as a separate browser-managed window; its chrome is not guaranteed to match
+the installed app window and was not separately verified.
+
+Install SamTill from Edge's **App available** / **Install this site as an
+app** action (or the app's real **Install app** prompt). This removes the
+normal browser tab strip and address bar, but does not remove every
+browser-owned app-window control. If all browser controls must be absent, a
+native desktop application is the supported alternative; adding a wrapper
+requires separate approval. Kiosk mode and CSS overlays that hide or imitate
+window controls are not used.
+
+Keep the manifest's `start_url`, `scope`, `id`, name, and icons root-relative:
+the app is served from the site root and the service worker scope is `/`.

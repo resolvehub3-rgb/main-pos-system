@@ -6,11 +6,25 @@ import { CustomerDisplayItem } from '../types';
 interface CustomerDisplayModalProps {
   /** Shop name shown in the header (customer-facing only). */
   tenantName: string;
+  /**
+   * Shop photo as a compressed data-URL — the same value the owner saved in
+   * Store Settings. Omitted when the shop has none, and the header then keeps
+   * its branded placeholder tile.
+   */
+  tenantLogo?: string;
   /** Projected cart lines — see src/lib/customerDisplay.ts. */
   items: CustomerDisplayItem[];
   /** Amount due, straight from the cashier's calculateCartTotals. */
   totalAmount: number;
-  onClose: () => void;
+  /**
+   * Dismiss handler for the close (X) button in the header.
+   *
+   * The button only exists where this is supplied: the in-page preview
+   * modal passes it so its fallback stays dismissible, while the real
+   * second-monitor customer screen (CustomerDisplayWindow) deliberately
+   * omits it — customers must not be able to close that screen.
+   */
+  onClose?: () => void;
 }
 
 /**
@@ -23,6 +37,7 @@ interface CustomerDisplayModalProps {
  */
 export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
   tenantName,
+  tenantLogo,
   items,
   totalAmount,
   onClose,
@@ -32,22 +47,32 @@ export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between pb-6 border-b border-slate-700/80">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-[#F28C28] flex items-center justify-center text-white shadow-lg">
-            <Store className="w-7 h-7" />
-          </div>
+          {tenantLogo ? (
+            <img
+              src={tenantLogo}
+              alt=""
+              className="w-12 h-12 rounded-2xl object-cover bg-[#F28C28] shadow-lg border border-orange-400/30"
+            />
+          ) : (
+            <div className="w-12 h-12 rounded-2xl bg-[#F28C28] flex items-center justify-center text-white shadow-lg">
+              <Store className="w-7 h-7" />
+            </div>
+          )}
           <div>
             <h1 className="text-2xl font-black tracking-tight">{tenantName}</h1>
             <p className="text-xs text-orange-300 font-semibold">Welcome! We appreciate your business.</p>
           </div>
         </div>
 
-        <button
-          onClick={onClose}
-          aria-label="Close Customer Display"
-          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
-        >
-          <X className="w-6 h-6" />
-        </button>
+        {onClose && (
+          <button
+            onClick={onClose}
+            aria-label="Close Customer Display"
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        )}
       </div>
 
       {/* Main Scanned Items Stream */}

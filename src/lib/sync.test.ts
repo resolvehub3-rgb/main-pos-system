@@ -14,6 +14,7 @@ import {
   tenantRow,
   toUuid,
   bindMirrorId,
+  hydrateIdentities,
   userRow,
   type SyncClient,
 } from './sync.ts';
@@ -37,6 +38,23 @@ const tenant: Tenant = {
 test('toUuid is deterministic so re-syncs upsert instead of duplicating', () => {
   assert.equal(toUuid('tenant-1'), toUuid('tenant-1'));
   assert.notEqual(toUuid('tenant-1'), toUuid('tenant-2'));
+});
+
+test('tenantRow mirrors the owner-edited receipt footer, cleared note included', () => {
+  // Never edited → NULL, which the app reads back as the default note.
+  assert.equal(tenantRow(tenant).receipt_footer, null);
+
+  // Saved text rides the same upsert as the name and address, so it reaches
+  // the database (and from there every session, over realtime) unchanged.
+  assert.equal(
+    tenantRow({ ...tenant, receipt_footer: 'Thanks for shopping at Accra Fresh Mart!' })
+      .receipt_footer,
+    'Thanks for shopping at Accra Fresh Mart!',
+  );
+
+  // An owner who cleared the note saved '' on purpose — collapsing it to NULL
+  // would hand the default note back to them on the next read.
+  assert.equal(tenantRow({ ...tenant, receipt_footer: '' }).receipt_footer, '');
 });
 
 test('toUuid emits a well-formed RFC-4122 UUID', () => {
@@ -96,6 +114,53 @@ test('bindMirrorId claims an adopted row without inventing an identity for it', 
   assert.equal(bindMirrorId('tenant-local-1'), undefined, 'an app id has no mirror identity yet');
   assert.equal(bindMirrorId(undefined), undefined);
   assert.equal(bindMirrorId(null), undefined);
+});
+
+test('hydrateIdentities collapses a row held under both its app id and its sync UUID', () => {
+  const appId = 'prod-1793370199171-1u2f7';
+  const uuid = toUuid(appId);
+  const local = { id: appId, barcode: '4006381333931', stock_quantity: 50 };
+  const twin = { id: uuid, barcode: '4006381333931', stock_quantity: 50 };
+
+  // Either order (the blob is written by whichever tab saved last): exactly
+  // one row survives, and the app-id copy wins so local sale items and stock
+  // movements that reference it still resolve.
+  for (const rows of [[local, twin], [twin, local]]) {
+    const hydrated = hydrateIdentities(rows);
+    assert.equal(hydrated.length, 1, 'the twin must not double the catalogue');
+    assert.equal(hydrated[0].id, appId, 'local references point at the app id');
+  }
+});
+
+test('hydrateIdentities registers id bindings so a realtime echo cannot re-duplicate the row', () => {
+  const appId = 'prod-echo-check-1';
+  const uuid = toUuid(appId);
+  const rows = [{ id: appId }, { id: uuid }];
+
+  // Simulate the second tab: it loaded the app-id row through the storage
+  // event, which registers nothing, so the echo's UUID used to resolve to
+  // unknown. Hydration must repair that for THIS session.
+  hydrateIdentities(rows);
+  assert.equal(fromUuid(uuid), appId, 'the push echo now resolves to the held row');
+});
+
+test('hydrateIdentities keeps distinct rows and adopted UUID-only rows untouched', () => {
+  const adopted = '8375aedb-7e6f-5010-b997-8f95a4daf4ba';
+  const rows = [
+    { id: 'prod-a' },
+    { id: 'prod-b' },
+    { id: adopted },
+    { id: 'tenant-local-1' },
+    { id: '' },
+  ];
+  const hydrated = hydrateIdentities(rows);
+  assert.deepEqual(
+    hydrated.map((r) => r.id),
+    ['prod-a', 'prod-b', adopted, 'tenant-local-1', ''],
+    'nothing collapses unless two ids are the same row',
+  );
+  assert.equal(fromUuid(adopted), adopted, 'an adopted row is claimed, not re-hashed');
+  assert.equal(fromUuid(toUuid('prod-a')), 'prod-a', 'app ids bind too');
 });
 
 test('tenantRow sends only columns the tenants table has', () => {

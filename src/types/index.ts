@@ -8,6 +8,13 @@ export interface Tenant {
   phone: string;
   email: string;
   address: string;
+  /**
+   * Owner-edited note printed at the foot of every receipt.
+   *
+   * `undefined` = never edited, so the app prints its built-in default note;
+   * `''` = the owner cleared it on purpose and no footer line is printed.
+   */
+  receipt_footer?: string;
   tax_number?: string;
   currency: string;
   is_active: boolean;
@@ -90,6 +97,13 @@ export interface CustomerDisplayItem {
  */
 export interface CustomerDisplayState {
   tenantName: string;
+  /**
+   * Shop photo as a compressed data-URL (see src/lib/image.ts), or omitted
+   * when the shop has none — the screen falls back to its branded placeholder.
+   * Carried in the same payload as the name so a logo saved on the owner's
+   * device reaches an already-open customer screen without a reload.
+   */
+  tenantLogo?: string;
   items: CustomerDisplayItem[];
   totalAmount: number;
 }
@@ -228,7 +242,21 @@ export interface UserAccount {
   role: UserRole;
   phone: string;
   password?: string;
+  /**
+   * Legacy plaintext till PIN from the old registration form. Never read,
+   * never verified, never mirrored — the cashier PIN flow uses `pin_hash`.
+   */
   pin?: string;
+  /**
+   * Cashier sign-in PIN as a salted device-side hash (`pbkdf2-sha256$…`,
+   * see src/lib/pinAuth.ts). Never plaintext, never mirrored to Supabase —
+   * the backend keeps its own bcrypt copy in `public.cashier_pins`.
+   */
+  pin_hash?: string;
+  /** Consecutive wrong PIN attempts; resets on a correct PIN or a new PIN. */
+  pin_failed_count?: number;
+  /** ISO timestamp until which this cashier's PIN is locked (5 wrong → 15 min). */
+  pin_locked_until?: string;
   is_active: boolean;
   created_at: string;
 }

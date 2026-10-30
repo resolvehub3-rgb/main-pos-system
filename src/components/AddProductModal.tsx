@@ -1,16 +1,79 @@
-import React, { useRef, useState } from 'react';
-import { X, Package, Barcode, Sparkles, Plus, Image, Upload, Trash2, Loader2 } from 'lucide-react';
-import { Product } from '../types';
+import React, { useMemo, useRef, useState } from 'react';
+import {
+  X,
+  Package,
+  Barcode,
+  Sparkles,
+  Plus,
+  Image,
+  Upload,
+  Trash2,
+  Loader2,
+  Camera,
+  Smartphone,
+  Keyboard,
+  ScanLine,
+  CheckCircle2,
+  AlertTriangle,
+  Plug,
+} from 'lucide-react';
+import { Product, UserAccount } from '../types';
 import { db } from '../lib/supabaseClient';
+import { assertImageFile, compressImage, readFileAsDataUrl } from '../lib/image';
+import {
+  findBarcodeConflict,
+  generateInternalBarcode,
+  validateBarcodeForRegistration,
+} from '../lib/barcode';
+import { canManageProducts } from '../lib/permissions';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface AddProductModalProps {
   tenantId: string;
+  /**
+   * The signed-in account from App state — the same one that gates the whole
+   * screen. `db.getCurrentUser()` can be cleared independently (a refused
+   * session restore or a SIGNED_OUT event), so relying on it alone would lock
+   * the owner out of their own form; falls back to the db session when absent.
+   */
+  currentUser?: UserAccount | null;
   onAddProduct: (product: Omit<Product, 'id' | 'created_at'>) => void;
   onClose: () => void;
 }
 
+/** How the owner wants to capture the product's barcode right now. */
+type ScanMethod = 'usb-scanner' | 'webcam' | 'mobile-camera' | 'manual';
+
+const SCAN_METHODS: { id: ScanMethod; label: string; hint: string; icon: typeof Barcode }[] = [
+  {
+    id: 'usb-scanner',
+    label: 'USB / Bluetooth Scanner',
+    hint: 'Pull the scanner trigger over the product barcode',
+    icon: Plug,
+  },
+  {
+    id: 'webcam',
+    label: 'Computer Webcam',
+    hint: 'Read the printed barcode with this computer camera',
+    icon: Camera,
+  },
+  {
+    id: 'mobile-camera',
+    label: 'Mobile Phone Camera',
+    hint: 'Use the back camera to scan the product',
+    icon: Smartphone,
+  },
+  {
+    id: 'manual',
+    label: 'Manual Entry',
+    hint: 'Type the barcode digits by hand',
+    icon: Keyboard,
+  },
+];
+
 export const AddProductModal: React.FC<AddProductModalProps> = ({
   tenantId,
+  currentUser,
   onAddProduct,
   onClose,
 }) => {
@@ -26,6 +89,12 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [minStock, setMinStock] = useState('10');
   const [unit, setUnit] = useState('Pack');
 
+  // Barcode capture state: method chooser, live camera scanner, feedback.
+  const [showScanMenu, setShowScanMenu] = useState(false);
+  const [cameraScan, setCameraScan] = useState<'webcam' | 'mobile-camera' | null>(null);
+  const [submitError, setSubmitError] = useState('');
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+
   // Product image: uploaded file stored as a compressed data-URL (renders instantly everywhere)
   const PLACEHOLDER_IMAGE =
     "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'><rect width='400' height='400' fill='%23e2e8f0'/><text x='200' y='210' font-family='sans-serif' font-size='26' font-weight='600' fill='%2394a3b8' text-anchor='middle'>No Image</text></svg>";
@@ -35,32 +104,19 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const MAX_IMAGE_SIZE_MB = 5;
+  // Shop-managed categories (owner creates/renames these in Inventory → Categories)
+  const shopCategories = db.getCategories(tenantId, { activeOnly: true });
+  const parentCategories = shopCategories.filter((c) => !c.parent_id);
+  const subcategoriesOf = (id: string) => shopCategories.filter((c) => c.parent_id === id);
 
-  // Downscale + compress on the client so uploads stay light in storage and sync instantly
-  const compressImage = (dataUrl: string): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const img = document.createElement('img');
-      img.onload = () => {
-        const maxDimension = 480;
-        const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
-        const width = Math.max(1, Math.round(img.width * scale));
-        const height = Math.max(1, Math.round(img.height * scale));
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(dataUrl);
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.75));
-      };
-      img.onerror = () => reject(new Error('Could not read this image file.'));
-      img.src = dataUrl;
-    });
+  // Barcode validation (format + duplicate) runs live off the local product
+  // mirror — no network, so registration and duplicate checks work offline.
+  const trimmedBarcode = barcode.trim();
+  const barcodeCheck = trimmedBarcode ? validateBarcodeForRegistration(trimmedBarcode) : null;
+  const barcodeConflict =
+    trimmedBarcode && barcodeCheck?.ok
+      ? findBarcodeConflict(db.getProducts(tenantId), trimmedBarcode, tenantId)
+      : undefined;
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -70,25 +126,15 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
     setImageError('');
 
-    if (!file.type.startsWith('image/')) {
-      setImageError('Please choose a valid image file (JPG, PNG or WebP).');
-      return;
-    }
-
-    if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
-      setImageError(`Image must be smaller than ${MAX_IMAGE_SIZE_MB} MB.`);
+    const fileProblem = assertImageFile(file);
+    if (fileProblem) {
+      setImageError(fileProblem);
       return;
     }
 
     setIsProcessingImage(true);
     try {
-      const raw = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error('Could not read this file.'));
-        reader.readAsDataURL(file);
-      });
-
+      const raw = await readFileAsDataUrl(file);
       const compressed = await compressImage(raw).catch(() => raw);
       setImageUrl(compressed);
     } catch (err) {
@@ -97,11 +143,6 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       setIsProcessingImage(false);
     }
   };
-
-  // Shop-managed categories (owner creates/renames these in Inventory → Categories)
-  const shopCategories = db.getCategories(tenantId, { activeOnly: true });
-  const parentCategories = shopCategories.filter((c) => !c.parent_id);
-  const subcategoriesOf = (id: string) => shopCategories.filter((c) => c.parent_id === id);
 
   const handleQuickCreateCategory = () => {
     const catName = quickCategoryName.trim();
@@ -120,19 +161,78 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     return result.category;
   };
 
+  /** Unique, checksum-valid fallback number (GS1 Ghana `600` prefix). */
   const generateRandomBarcode = () => {
-    // Generate valid 13-digit EAN style string
-    const rand = '600' + Math.floor(100000000 + Math.random() * 900000000).toString();
-    setBarcode(rand);
+    setBarcode(generateInternalBarcode(db.getProducts().map((p) => p.barcode)));
+    setSubmitError('');
+    if (successMsg) setSuccessMsg('');
+  };
+
+  /** Owner picked a scanning method from the Scan Barcode menu. */
+  const handleSelectScanMethod = (method: ScanMethod) => {
+    setShowScanMenu(false);
+    setSubmitError('');
+    if (method === 'webcam' || method === 'mobile-camera') {
+      setCameraScan(method);
+      return;
+    }
+    // USB/Bluetooth scanner and manual entry both write into the barcode
+    // field: focus it so the scanner's keystrokes land here (or the owner
+    // can type). A scanner appends Enter, which the field handles below.
+    barcodeInputRef.current?.focus();
+    barcodeInputRef.current?.select();
+  };
+
+  /** A barcode was just typed/scanned into the field: normalise it. */
+  const handleBarcodeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    // USB/Bluetooth scanners finish every read with Enter — consume it so the
+    // form does not submit while the owner is still filling in the rest.
+    e.preventDefault();
+    setBarcode((value) => value.trim());
+    if (successMsg) setSuccessMsg('');
+  };
+
+  /** Camera scan finished — the decoded barcode lands in the field. */
+  const handleCameraCapture = (captured: string) => {
+    setBarcode(captured);
+    setCameraScan(null);
+    setSubmitError('');
+    if (successMsg) setSuccessMsg('');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // App state's session first (the one that gated this screen), falling back
+    // to the db session — either source proves ownership; a cashier session
+    // fails the check under both.
+    if (!canManageProducts(currentUser ?? db.getCurrentUser(), tenantId)) {
+      setSubmitError('Only the shop owner can register products.');
+      return;
+    }
     if (!name.trim()) {
       alert('Product name is required');
       return;
     }
-    const finalBarcode = barcode.trim() || '600' + Date.now().toString().slice(-9);
+
+    // Barcode: blank → generate a unique valid internal one; present → must
+    // be a recognised symbology and not already used by another product.
+    let finalBarcode: string;
+    if (trimmedBarcode) {
+      if (!barcodeCheck?.ok) {
+        setSubmitError(barcodeCheck?.message || 'Enter a valid barcode.');
+        return;
+      }
+      if (barcodeConflict) {
+        setSubmitError(
+          `Barcode ${trimmedBarcode} is already used by “${barcodeConflict.name}”. Scan a different barcode or edit that product instead.`,
+        );
+        return;
+      }
+      finalBarcode = trimmedBarcode;
+    } else {
+      finalBarcode = generateInternalBarcode(db.getProducts().map((p) => p.barcode));
+    }
 
     // Optional inline category creation (owner only — guarded in the service)
     let finalCategoryId = categoryId;
@@ -163,7 +263,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     });
 
     // Keep the modal open so the owner can add more products; they close it themselves.
-    setSuccessMsg(`"${name.trim()}" added to your catalogue.`);
+    setSuccessMsg(`“${name.trim()}” added to your catalogue with barcode ${finalBarcode}.`);
     setName('');
     setBarcode('');
     setImageUrl('');
@@ -172,6 +272,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setQuickCategoryName('');
     setShowQuickCategory(false);
     setQuickCategoryError('');
+    setSubmitError('');
   };
 
   return (
@@ -222,13 +323,19 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
             />
           </div>
 
-          {/* Barcode & Auto-Generator */}
+          {/* Barcode: scan the manufacturer barcode or auto-generate one */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="font-bold">Retail Barcode (EAN-13 / UPC)</label>
+              <label className="font-bold">
+                Retail Barcode{' '}
+                <span className="font-medium text-slate-400">
+                  (EAN-13 / EAN-8 / UPC-A / UPC-E / Code 128 / Code 39)
+                </span>
+              </label>
               <button
                 type="button"
                 onClick={generateRandomBarcode}
+                title="Generate a unique internal barcode for a product without a printed one"
                 className="text-[#F28C28] hover:underline font-bold flex items-center gap-1 text-[11px]"
               >
                 <Sparkles className="w-3 h-3" />
@@ -238,13 +345,84 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
             <div className="relative">
               <Barcode className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
+                ref={barcodeInputRef}
                 type="text"
-                placeholder="Scan barcode or type digits"
+                inputMode="text"
+                autoComplete="off"
+                placeholder="Scan the product barcode or type it here"
                 value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
+                onChange={(e) => {
+                  setBarcode(e.target.value);
+                  setSubmitError('');
+                  if (successMsg) setSuccessMsg('');
+                }}
+                onKeyDown={handleBarcodeKeyDown}
+                className="w-full pl-9 pr-32 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-[#F28C28] focus:outline-none"
               />
+              {/* Scan method chooser: scanner trigger, webcam, phone or keyboard */}
+              <button
+                type="button"
+                onClick={() => setShowScanMenu((v) => !v)}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-[#102A4C] hover:bg-slate-800 text-white text-[11px] font-bold flex items-center gap-1.5 transition"
+              >
+                <ScanLine className="w-3.5 h-3.5" />
+                <span>Scan Barcode</span>
+              </button>
+              {showScanMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowScanMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 w-64 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden">
+                    {SCAN_METHODS.map((method) => {
+                      const Icon = method.icon;
+                      return (
+                        <button
+                          key={method.id}
+                          type="button"
+                          onClick={() => handleSelectScanMethod(method.id)}
+                          className="w-full flex items-start gap-2.5 p-3 hover:bg-slate-50 text-left transition border-b border-slate-100 last:border-b-0"
+                        >
+                          <Icon className="w-4 h-4 text-[#F28C28] mt-0.5 flex-shrink-0" />
+                          <span>
+                            <span className="block font-bold text-slate-800 text-[11px]">
+                              {method.label}
+                            </span>
+                            <span className="block text-[10px] font-medium text-slate-400">
+                              {method.hint}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
+
+            {/* Live validation: format detected + duplicate protection */}
+            {barcodeCheck?.ok && !barcodeConflict && (
+              <p className="mt-1 text-[10px] font-semibold text-emerald-600 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" />
+                {barcodeCheck.format} barcode ready — will be checked for duplicates when saved.
+              </p>
+            )}
+            {barcodeCheck && !barcodeCheck.ok && (
+              <p className="mt-1 text-[10px] font-semibold text-rose-600 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                {barcodeCheck.message}
+              </p>
+            )}
+            {barcodeConflict && (
+              <p className="mt-1 text-[10px] font-semibold text-rose-600 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                This barcode is already assigned to “{barcodeConflict.name}”.
+              </p>
+            )}
+            {!trimmedBarcode && (
+              <p className="mt-1 text-[10px] font-medium text-slate-400">
+                Leave blank to auto-generate an internal barcode (fallback when the product has no
+                printed one).
+              </p>
+            )}
           </div>
 
           {/* Category & Unit */}
@@ -461,6 +639,14 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
             )}
           </div>
 
+          {/* Submission error (invalid / duplicate barcode, permission) */}
+          {submitError && (
+            <div className="flex items-start gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-px" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
             <button
@@ -479,6 +665,18 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Live camera scanner (webcam / phone camera) — sibling overlay so it
+          sits above the product form regardless of the card's scroll state */}
+      {cameraScan && (
+        <BarcodeScannerModal
+          title={cameraScan === 'webcam' ? 'Scan with Webcam' : 'Scan with Phone Camera'}
+          subtitle="Hold the product so its printed barcode fills the frame — scanning stops automatically."
+          initialFacing={cameraScan === 'mobile-camera' ? 'environment' : 'user'}
+          onCapture={handleCameraCapture}
+          onClose={() => setCameraScan(null)}
+        />
+      )}
     </div>
   );
 };

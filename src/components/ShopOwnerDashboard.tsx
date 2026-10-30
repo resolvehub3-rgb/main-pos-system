@@ -33,6 +33,8 @@ import {
   RefreshCw,
   BookOpen,
   Tags,
+  Upload,
+  Store,
 } from 'lucide-react';
 import {
   BarChart,
@@ -52,6 +54,8 @@ import {
 import { db } from '../lib/supabaseClient';
 import { playScannerBeep } from '../lib/sound';
 import { useTerminalSettings, updateTerminalSettings } from '../lib/terminalSettings';
+import { DEFAULT_RECEIPT_FOOTER, receiptFooterText } from '../lib/receiptFooter';
+import { assertImageFile, compressImage, readFileAsDataUrl } from '../lib/image';
 import {
   checkBridge,
   sendTestPage,
@@ -62,19 +66,39 @@ import {
 import { Product, Sale, Tenant, Customer, Expense, UserAccount, InventoryMovementType } from '../types';
 import { CategoryManager } from './CategoryManager';
 import { StockBookView } from './StockBookView';
+import { EditProductModal } from './EditProductModal';
 import { estimateStockDays, effectiveUnitCost, MOVEMENT_TYPE_LABELS, movementDelta } from '../lib/stockBook';
 import { canAdjustStock } from '../lib/permissions';
 
 interface ShopOwnerDashboardProps {
   currentTenant: Tenant;
+  /**
+   * The signed-in owner from App state. Passed down so the product editor's
+   * permission check reads the same session the screen was gated on — the db
+   * copy can be cleared independently by a refused session restore.
+   */
+  currentUser: UserAccount;
   sales: Sale[];
   products: Product[];
   onOpenAddProduct: () => void;
   onOpenPOS: () => void;
 }
 
+/** Draft of the **Supermarket Store Settings** form, seeded from the tenant. */
+const storeProfileFrom = (tenant: Tenant) => ({
+  name: tenant.name,
+  address: tenant.address,
+  phone: tenant.phone,
+  receipt_footer: receiptFooterText(tenant),
+  /** Compressed data-URL; `''` = no photo (the screen shows its placeholder). */
+  logo_url: tenant.logo_url ?? '',
+});
+
+type StoreProfileDraft = ReturnType<typeof storeProfileFrom>;
+
 export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   currentTenant,
+  currentUser,
   sales,
   products,
   onOpenAddProduct,
@@ -99,6 +123,9 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   // Modals for Shop Owner
   const [selectedSaleDetail, setSelectedSaleDetail] = useState<Sale | null>(null);
   const [showStockAdjustModal, setShowStockAdjustModal] = useState<Product | null>(null);
+  // Product being edited (prices, category, unit AND its real barcode — the
+  // owner can re-scan a manufacturer barcode or fix a mistyped one here).
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [stockAdjustQty, setStockAdjustQty] = useState('10');
   const [stockAdjustReason, setStockAdjustReason] = useState('Restock shipment from supplier');
   const [stockAdjustType, setStockAdjustType] = useState<InventoryMovementType>('restock');
@@ -107,6 +134,81 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
 
   // Terminal hardware settings (printer & audio) — owned here, applied live on cashier tills
   const terminalSettings = useTerminalSettings();
+
+  // Store profile (Supermarket Store Settings) — a draft of the four fields
+  // that get printed on every receipt. It re-seeds from `currentTenant`
+  // whenever that tenant's profile changes, so a save made on another device
+  // lands in this form live instead of being overwritten by the next keystroke
+  // here; while the owner is typing nothing changes remotely, so the draft is
+  // not disturbed.
+  const [storeProfile, setStoreProfile] = useState<StoreProfileDraft>(() =>
+    storeProfileFrom(currentTenant)
+  );
+  const [storeProfileMsg, setStoreProfileMsg] = useState<{ ok: boolean; text: string } | null>(
+    null
+  );
+  // Photo picking has its own transient state: the file is validated and
+  // compressed the moment it is chosen, but only written to the tenant when
+  // Save Store Profile is pressed — same as every other field in this form.
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoError, setLogoError] = useState('');
+
+  useEffect(() => {
+    setStoreProfile(storeProfileFrom(currentTenant));
+  }, [
+    currentTenant.id,
+    currentTenant.name,
+    currentTenant.address,
+    currentTenant.phone,
+    currentTenant.receipt_footer,
+    currentTenant.logo_url,
+  ]);
+
+  const setStoreField = (field: keyof StoreProfileDraft, value: string) => {
+    setStoreProfile((prev) => ({ ...prev, [field]: value }));
+    setStoreProfileMsg(null);
+  };
+
+  const handleSaveStoreProfile = () => {
+    const result = db.updateStoreProfile(currentTenant.id, storeProfile);
+    setStoreProfileMsg({ ok: result.ok, text: result.message });
+  };
+
+  /**
+   * Validate, read and downscale a picked photo into the draft.
+   *
+   * The compressed JPEG is what gets saved, so the value mirrored to `tenants`
+   * — and therefore broadcast to every till and to the customer display — stays
+   * a few tens of kilobytes instead of a multi-megabyte camera file.
+   */
+  const handleLogoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset so re-selecting the same file fires this handler again.
+    e.target.value = '';
+    if (!file) return;
+
+    setLogoError('');
+    const problem = assertImageFile(file);
+    if (problem) {
+      setLogoError(problem);
+      return;
+    }
+
+    setLogoBusy(true);
+    try {
+      const raw = await readFileAsDataUrl(file);
+      const compressed = await compressImage(raw, { maxDimension: 512, quality: 0.8 }).catch(
+        () => raw
+      );
+      setStoreField('logo_url', compressed);
+    } catch (err) {
+      setLogoError(
+        err instanceof Error ? err.message : 'Photo upload failed. Please try another file.'
+      );
+    } finally {
+      setLogoBusy(false);
+    }
+  };
 
   // Local print bridge (direct USB/thermal output). Owner-only — cashiers never
   // see this panel, and it applies live to every open till.
@@ -172,6 +274,7 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   const [staffPassword, setStaffPassword] = useState('');
   const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [staffError, setStaffError] = useState('');
+  const [staffSaving, setStaffSaving] = useState(false);
   const [staffCreatedMsg, setStaffCreatedMsg] = useState('');
   const [staffRemovedMsg, setStaffRemovedMsg] = useState('');
 
@@ -391,6 +494,26 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
     setShowStockAdjustModal(null);
   };
 
+  // Save product edits (name, prices, unit, category AND barcode). The Edit
+  // modal validates the barcode (format + duplicate) before this runs; the
+  // service refuses a duplicate as a last line of defence, so its message is
+  // surfaced rather than swallowed.
+  const handleSaveProductEdit = (productId: string, updates: Partial<Product>) => {
+    let ok = false;
+    let failure = '';
+    try {
+      ok = db.updateProduct(productId, updates);
+      if (!ok) failure = 'Could not save — the product no longer exists.';
+    } catch (err) {
+      failure = err instanceof Error ? err.message : 'Could not save the product.';
+    }
+    if (!ok) {
+      alert(failure);
+      return;
+    }
+    setEditingProduct(null);
+  };
+
   // Create customer
   const handleCreateCustomer = (e: React.FormEvent) => {
     e.preventDefault();
@@ -422,8 +545,8 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
     setShowAddExpenseModal(false);
   };
 
-  // Create staff with an owner-created login password (saved + usable immediately)
-  const handleCreateStaff = (e: React.FormEvent) => {
+  // Provision the online Auth identity before showing a successful local save.
+  const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     setStaffError('');
 
@@ -450,26 +573,43 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
       return;
     }
 
-    const created = db.addUser({
-      tenant_id: currentTenant.id,
-      shop_name: currentTenant.name,
-      full_name: name,
-      email,
-      phone: staffPhone.trim(),
-      role: staffRole,
-      password: staffPassword,
-      is_active: true,
-    });
+    setStaffSaving(true);
+    try {
+      const provisioned = await db.provisionStaffLogin({
+        tenantId: currentTenant.id,
+        fullName: name,
+        email,
+        phone: staffPhone.trim(),
+        password: staffPassword,
+        role: staffRole,
+      });
+      if (!provisioned.ok) {
+        setStaffError(provisioned.message);
+        return;
+      }
 
-    // Reset form and confirm instantly — the staff table updates in real time.
-    setStaffName('');
-    setStaffEmail('');
-    setStaffPhone('+233 ');
-    setStaffRole('cashier');
-    setStaffPassword('');
-    setShowStaffPassword(false);
-    setStaffCreatedMsg(`${created.full_name} can now sign in with ${created.email}`);
-    setShowAddStaffModal(false);
+      const created = db.addUser({
+        ...(provisioned.userId ? { id: provisioned.userId } : { password: staffPassword }),
+        tenant_id: currentTenant.id,
+        shop_name: currentTenant.name,
+        full_name: name,
+        email,
+        phone: staffPhone.trim(),
+        role: staffRole,
+        is_active: true,
+      });
+
+      setStaffName('');
+      setStaffEmail('');
+      setStaffPhone('+233 ');
+      setStaffRole('cashier');
+      setStaffPassword('');
+      setShowStaffPassword(false);
+      setStaffCreatedMsg(`${created.full_name} can now sign in with ${created.email}`);
+      setShowAddStaffModal(false);
+    } finally {
+      setStaffSaving(false);
+    }
   };
 
   /**
@@ -1404,15 +1544,11 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                       <td className="py-3 font-bold text-slate-800">{p.stock_quantity}</td>
                       <td className="py-3 text-right space-x-2">
                         <button
-                          onClick={() => {
-                            const newPrice = prompt(`Enter new selling price for ${p.name}:`, p.selling_price.toString());
-                            if (newPrice) {
-                              db.updateProduct(p.id, { selling_price: parseFloat(newPrice) || p.selling_price });
-                            }
-                          }}
+                          onClick={() => setEditingProduct(p)}
+                          title="Edit prices, category and barcode"
                           className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] transition"
                         >
-                          Edit Price
+                          Edit
                         </button>
                         <button
                           onClick={() => {
@@ -1696,10 +1832,57 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
 
             <div className="space-y-4 text-xs font-medium text-slate-700">
               <div>
+                <label className="block font-bold mb-1">Shop Profile Photo</label>
+                <div className="flex items-center gap-3">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-300 overflow-hidden flex items-center justify-center flex-shrink-0">
+                    {storeProfile.logo_url ? (
+                      <img
+                        src={storeProfile.logo_url}
+                        alt="Shop profile"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <Store className="w-7 h-7 text-slate-400" />
+                    )}
+                  </div>
+                  <div>
+                    <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer text-[11px] font-bold text-slate-700 transition">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{storeProfile.logo_url ? 'Change photo' : 'Upload photo'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        onChange={handleLogoFile}
+                      />
+                    </label>
+                    {storeProfile.logo_url && (
+                      <button
+                        type="button"
+                        onClick={() => setStoreField('logo_url', '')}
+                        className="block mt-1.5 text-[11px] font-bold text-rose-600 hover:text-rose-700"
+                      >
+                        Remove photo
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {logoBusy && <p className="text-[11px] text-slate-500 mt-1.5">Preparing photo…</p>}
+                {logoError && (
+                  <p className="text-[11px] font-bold text-rose-600 mt-1.5">{logoError}</p>
+                )}
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  Shows on the customer display screen. Press <b>Save Store Profile</b> to apply
+                  it everywhere.
+                </p>
+              </div>
+
+              <div>
                 <label className="block font-bold mb-1">Store Legal Name</label>
                 <input
                   type="text"
-                  defaultValue={currentTenant.name}
+                  value={storeProfile.name}
+                  onChange={(e) => setStoreField('name', e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-800"
                 />
               </div>
@@ -1708,7 +1891,8 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                 <label className="block font-bold mb-1">Physical Address on Receipts</label>
                 <input
                   type="text"
-                  defaultValue={currentTenant.address}
+                  value={storeProfile.address}
+                  onChange={(e) => setStoreField('address', e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-800"
                 />
               </div>
@@ -1717,7 +1901,8 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                 <label className="block font-bold mb-1">Store Phone Contact</label>
                 <input
                   type="text"
-                  defaultValue={currentTenant.phone}
+                  value={storeProfile.phone}
+                  onChange={(e) => setStoreField('phone', e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-800"
                 />
               </div>
@@ -1725,16 +1910,29 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
               <div>
                 <label className="block font-bold mb-1">Receipt Footer Note</label>
                 <textarea
-                  defaultValue="Thank you for shopping with us! Goods sold are returnable within 48h with receipt."
+                  value={storeProfile.receipt_footer}
+                  onChange={(e) => setStoreField('receipt_footer', e.target.value)}
+                  placeholder={DEFAULT_RECEIPT_FOOTER}
                   className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-800"
                   rows={2}
                 />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Printed at the foot of every receipt. Leave blank for no footer note.
+                </p>
               </div>
 
-              <div className="pt-4 border-t border-slate-200 flex justify-end">
+              <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3">
+                {storeProfileMsg && (
+                  <span
+                    role="status"
+                    className={`text-[11px] font-bold ${storeProfileMsg.ok ? 'text-emerald-600' : 'text-rose-600'}`}
+                  >
+                    {storeProfileMsg.text}
+                  </span>
+                )}
                 <button
                   type="button"
-                  onClick={() => alert('Store settings updated successfully!')}
+                  onClick={handleSaveStoreProfile}
                   className="px-5 py-2.5 bg-[#F28C28] hover:bg-orange-600 text-white rounded-xl font-extrabold transition"
                 >
                   Save Store Profile
@@ -2173,6 +2371,17 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
           </div>
         )}
 
+        {/* Edit Product Modal (prices, category, unit AND real barcode capture) */}
+        {editingProduct && (
+          <EditProductModal
+            tenantId={currentTenant.id}
+            currentUser={currentUser}
+            product={editingProduct}
+            onEditProduct={handleSaveProductEdit}
+            onClose={() => setEditingProduct(null)}
+          />
+        )}
+
         {/* Add Expense Modal */}
         {showAddExpenseModal && (
           <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -2337,19 +2546,21 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
                 <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
                   <button
                     type="button"
+                    disabled={staffSaving}
                     onClick={() => {
                       setStaffError('');
                       setShowAddStaffModal(false);
                     }}
-                    className="px-4 py-2 border border-slate-300 text-slate-700 font-bold hover:bg-slate-100 rounded-xl transition"
+                    className="px-4 py-2 border border-slate-300 text-slate-700 font-bold hover:bg-slate-100 rounded-xl transition disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-[#F28C28] hover:bg-orange-600 text-white font-extrabold rounded-xl shadow-md transition"
+                    disabled={staffSaving}
+                    className="px-5 py-2 bg-[#F28C28] hover:bg-orange-600 text-white font-extrabold rounded-xl shadow-md transition disabled:opacity-50"
                   >
-                    Save Cashier
+                    {staffSaving ? 'Creating login…' : 'Save Cashier'}
                   </button>
                 </div>
               </form>

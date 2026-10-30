@@ -21,7 +21,7 @@ import {
 } from './lib/customerDisplayChannel';
 import { ArrowLeft, Store } from 'lucide-react';
 
-export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login' | 'register'} = {}) {
+export default function App() {
   // Authentication & Current User Session
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => db.getCurrentUser());
   const [selectedShopId, setSelectedShopId] = useState<string>('tenant-accra-mall');
@@ -36,6 +36,9 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
   const [customerDisplayWindow, setCustomerDisplayWindow] = useState<Window | null>(null);
   const [showAddProductModal, setShowAddProductModal] = useState<boolean>(false);
   const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
+  // A sign-out the operator asked for that is being held until the open shift
+  // is counted and closed (see handleLogout / the gate effect below).
+  const [pendingSignOut, setPendingSignOut] = useState<boolean>(false);
 
   // Cart state for Cashier POS
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -107,22 +110,34 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
   useEffect(() => {
     if (!currentUser) return;
     return serveCustomerDisplay(
-      () => buildCustomerDisplayState(currentTenant.name, cart, cartTotals.total),
+      () =>
+        buildCustomerDisplayState(
+          currentTenant.name,
+          cart,
+          cartTotals.total,
+          currentTenant.logo_url,
+        ),
       () => setCustomerDisplayWindow(null),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, cart, cartTotals.total, currentTenant.name]);
+  }, [currentUser, cart, cartTotals.total, currentTenant.name, currentTenant.logo_url]);
 
   // Push every cart change (scan, quantity change, removal, clear, completed
-  // sale) to the customer display popup. Logged out → clear the customer
-  // screen.
+  // sale) to the customer display popup. The shop name and logo ride along, so
+  // a profile photo saved on the owner's device re-publishes here and lands on
+  // an already-open customer screen. Logged out → clear the customer screen.
   useEffect(() => {
     publishCustomerDisplayState(
       currentUser
-        ? buildCustomerDisplayState(currentTenant.name, cart, cartTotals.total)
+        ? buildCustomerDisplayState(
+            currentTenant.name,
+            cart,
+            cartTotals.total,
+            currentTenant.logo_url,
+          )
         : buildCustomerDisplayState('', [], 0),
     );
-  }, [cart, cartTotals.total, currentTenant.name, currentUser]);
+  }, [cart, cartTotals.total, currentTenant.name, currentTenant.logo_url, currentUser]);
 
   // Handle atomic sale completion
   const handleCompleteSale = (saleData: {
@@ -142,17 +157,61 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
     });
   };
 
-  // Handle add product
+  // Handle add product. The Add Product modal validates the barcode
+  // (format + duplicate) before calling this; the service re-checks and
+  // throws on a duplicate, so its message is surfaced instead of swallowed.
   const handleAddProduct = (newProduct: Omit<Product, 'id' | 'created_at'>) => {
-    db.addProduct(newProduct);
+    try {
+      db.addProduct(newProduct);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not add the product.');
+    }
   };
 
-  // Handle logout
-  const handleLogout = () => {
+  // Handle logout.
+  //
+  // A till with an open shift may not sign out — the drawer has to be counted
+  // first. The request is held in `pendingSignOut` and routed into the POS
+  // screen, which jumps to the Cash Drawer tab and opens the Close Shift /
+  // Z-report modal; the moment the shift closes (from that modal, or from
+  // another tab's storage write — both re-render `activeShift` live), the
+  // effect below finishes the sign-out that was asked for. Dismissing the
+  // modal cancels it instead, leaving the operator signed in.
+  const performLogout = () => {
     db.logout();
+    // Rewrite the URL to /login *before* clearing the user, so the auth page
+    // mounts on the Login tab. Without this the tab could fall back to
+    // Register for anyone whose first visit was the /register deep link.
+    syncAuthUrl(null);
     setCurrentUser(null);
     setShopOwnerViewingPOS(false);
+    setPendingSignOut(false);
   };
+
+  // The close-shift controls live on the POS screen, so the gate applies only
+  // where they are reachable: always for a cashier (that screen is their whole
+  // workspace) and for the owner while they are in till-testing mode. A shift
+  // left open behind the owner dashboard has no UI to close it, so it must not
+  // turn into a dead end that traps them in the session.
+  const posScreenOpen =
+    currentUser?.role === 'cashier' ||
+    (currentUser?.role === 'shop_owner' && shopOwnerViewingPOS);
+  const signOutBlocked = posScreenOpen && Boolean(activeShift);
+
+  const handleLogout = () => {
+    if (signOutBlocked) {
+      setPendingSignOut(true);
+      return;
+    }
+    performLogout();
+  };
+
+  // Release the held sign-out as soon as the gate clears: the shift is closed
+  // (or the POS screen that owns the controls went away).
+  useEffect(() => {
+    if (pendingSignOut && !signOutBlocked) performLogout();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSignOut, signOutBlocked]);
 
   // Open the customer screen as a separate browser window the operator drags
   // to the customer-facing monitor. Browsers only allow windows opened from a
@@ -186,11 +245,20 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
     }, 1000);
   };
 
-  // If user is not authenticated, show the Login and Register page
+  // If user is not authenticated, show the Login and Register page.
+  // The tab follows the URL *now*, not whatever tab the session was opened
+  // from: a session that started on /register would otherwise return to the
+  // Register tab after every logout. Logout rewrites the URL to /login (see
+  // handleLogout → syncAuthUrl), so Register only appears for an explicit
+  // /register deep link.
   if (!currentUser) {
+    const authTab: 'login' | 'register' =
+      typeof window !== 'undefined' && window.location.pathname === '/register'
+        ? 'register'
+        : 'login';
     return (
       <AuthPage
-        initialTab={initialAuthTab}
+        initialTab={authTab}
         onLoginSuccess={(user) => {
           setCurrentUser(user);
           if (user.tenant_id) {
@@ -259,6 +327,8 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
               currentTenant={currentTenant}
               products={products.filter((p) => p.tenant_id === currentTenant.id)}
               activeShift={activeShift}
+              pendingSignOut={pendingSignOut}
+              onCancelSignOut={() => setPendingSignOut(false)}
               onCompleteSale={handleCompleteSale}
               onPrintLastReceipt={(sale, opts) =>
                 setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
@@ -270,6 +340,7 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
           ) : (
             <ShopOwnerDashboard
               currentTenant={currentTenant}
+              currentUser={currentUser}
               sales={sales}
               products={products}
               onOpenAddProduct={() => setShowAddProductModal(true)}
@@ -283,6 +354,8 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
             currentTenant={currentTenant}
             products={products.filter((p) => p.tenant_id === currentTenant.id)}
             activeShift={activeShift}
+            pendingSignOut={pendingSignOut}
+            onCancelSignOut={() => setPendingSignOut(false)}
             onCompleteSale={handleCompleteSale}
             onPrintLastReceipt={(sale, opts) =>
               setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
@@ -308,6 +381,7 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
       {showCustomerDisplay && (
         <CustomerDisplayModal
           tenantName={currentTenant.name}
+          tenantLogo={currentTenant.logo_url}
           items={cartToCustomerItems(cart)}
           totalAmount={cartTotals.total}
           onClose={() => setShowCustomerDisplay(false)}
@@ -318,6 +392,7 @@ export default function App({initialAuthTab = 'login'}: {initialAuthTab?: 'login
       {showAddProductModal && (
         <AddProductModal
           tenantId={currentTenant.id}
+          currentUser={currentUser}
           onAddProduct={handleAddProduct}
           onClose={() => setShowAddProductModal(false)}
         />

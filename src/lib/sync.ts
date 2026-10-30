@@ -125,6 +125,56 @@ export function toUuid(appId: string): string {
   return uuid;
 }
 
+/**
+ * Hydrate one collection read back from the shared localStorage blob.
+ *
+ * The blob is written by whichever tab saved last, and a tab that learned a
+ * row through the `storage` event has no idea that the row's app id and the
+ * database UUID it syncs under are the same entity — `appIdsByUuid` is
+ * per-session and the `storage` path registers nothing. Left alone, two
+ * problems follow:
+ *
+ *  1. A realtime echo of a row this device pushed (arriving keyed by the
+ *     UUID) looks like an unknown record and is adopted as a second copy.
+ *     That twin then shows a product twice, trips the duplicate-barcode guard
+ *     against the product's *own* barcode, and double-counts a sale.
+ *  2. Even with twins present, nothing links the two ids, so every later
+ *     echo keeps landing on the wrong row.
+ *
+ * So each identity group collapses to a single row — the app-id copy wins,
+ * because local sales and stock movements reference products by the id the
+ * app minted — and every surviving row re-registers its binding, so the next
+ * realtime echo resolves to the row actually held.
+ */
+export function hydrateIdentities<T extends { id: string }>(rows: T[]): T[] {
+  const kept: T[] = [];
+  const indexByUuid = new Map<string, number>();
+  for (const row of rows) {
+    if (!row || typeof row.id !== 'string' || !row.id) {
+      kept.push(row);
+      continue;
+    }
+    const uuid = toUuid(row.id);
+    const at = indexByUuid.get(uuid);
+    if (at === undefined) {
+      indexByUuid.set(uuid, kept.length);
+      kept.push(row);
+      continue;
+    }
+    // A twin of a row already kept: replace only a UUID-held copy with the
+    // app-id one (local references point at the app id); anything else is a
+    // duplicate of the same shape and the first copy stands.
+    if (!isUuid(row.id) && isUuid(kept[at].id)) kept[at] = row;
+  }
+  for (const row of kept) {
+    if (row && typeof row.id === 'string' && row.id) {
+      if (isUuid(row.id)) bindMirrorId(row.id);
+      else toUuid(row.id);
+    }
+  }
+  return kept;
+}
+
 /** Safe nullable uuid — blank/undefined app ids become SQL NULL, never ''. */
 const uuidOrNull = (id: string | undefined | null): string | null =>
   id && id.trim() ? toUuid(id) : null;
@@ -171,6 +221,17 @@ function enqueue(table: string, send: () => PromiseLike<SyncResult>): void {
 /** Fire a write, swallow and report failures. Never throws, never blocks. */
 function push(table: string, promise: () => PromiseLike<SyncResult>): void {
   enqueue(table, promise);
+}
+
+/**
+ * Queue a trusted RPC (not a row upsert) through the same FIFO chain.
+ *
+ * Used for PIN assignment: the write must land AFTER the cashier's `users`
+ * row it references, and an unreachable backend must not block the owner —
+ * the device keeps working and the queue reports any failure once.
+ */
+export function pushRpc(name: string, send: () => PromiseLike<SyncResult>): void {
+  enqueue(name, send);
 }
 
 /**
@@ -223,6 +284,10 @@ export function tenantRow(t: Tenant): Record<string, unknown> {
     phone: t.phone || null,
     email: t.email || null,
     address: t.address || null,
+    // `?? null` rather than `|| null`: an owner who cleared the note saved an
+    // explicit empty string, and collapsing it to NULL would hand the default
+    // note back to them.
+    receipt_footer: t.receipt_footer ?? null,
     tax_number: t.tax_number || null,
     currency: t.currency || 'GHS',
     is_active: t.is_active,

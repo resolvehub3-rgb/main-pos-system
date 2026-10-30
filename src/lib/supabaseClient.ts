@@ -20,7 +20,8 @@ import type {
   UserAccount,
   PaymentMethod,
 } from '../types/index.ts';
-import { canManageCategories, canViewStockBook, canAdjustStock } from './permissions.ts';
+import { canManageCategories, canViewStockBook, canAdjustStock, canManageStoreProfile } from './permissions.ts';
+import { findBarcodeConflict, sanitizeBarcodeInput } from './barcode.ts';
 import {
   weightedAverageOnReceipt,
   effectiveUnitCost,
@@ -46,6 +47,7 @@ import {
   toUuid,
   fromUuid,
   bindMirrorId,
+  hydrateIdentities,
 } from './sync.ts';
 import {
   adoptBranch,
@@ -63,7 +65,9 @@ import {
   resolveAuthUser,
   signUpAndProvisionShop,
   ensureOwnerShop,
+  provisionStaffWithSupabase,
   type SupabaseAuthClient,
+  type StaffProvisionResult,
 } from './authProvider.ts';
 
 // Environment variables for real Supabase deployment.
@@ -154,6 +158,14 @@ class DatabaseService {
   constructor() {
     this.loadState();
     this.initSupabaseClient();
+    // Cross-tab realtime: every mutation already broadcasts to subscribers in
+    // *this* tab (notify), but a second window of the app only learns about it
+    // through the shared localStorage blob. The `storage` event fires in every
+    // other tab that made the write, so re-hydrating there makes a shift (or
+    // any other row) opened on one till appear on the rest immediately.
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('storage', this.handleStorageEvent);
+    }
     // Let the sync layer resolve a row's tenant when it queues a child write,
     // so the tenant is always acknowledged before the row that references it.
     setTenantLookup((id) => this.tenants.find((t) => t.id === id));
@@ -189,36 +201,45 @@ class DatabaseService {
       // Load persistent records (starts completely empty if new)
       const storedData = localStorage.getItem(STORAGE_KEY_DATA);
       if (storedData) {
-        const parsed = JSON.parse(storedData);
-        this.products = parsed.products || [];
-        this.sales = parsed.sales || [];
-        this.tenants = parsed.tenants || [];
-        this.branches = parsed.branches || [];
-        this.shifts = parsed.shifts || [];
-        this.movements = parsed.movements || [];
-        this.users = parsed.users || [];
-        this.customers = parsed.customers || [];
-        this.expenses = parsed.expenses || [];
-        this.plans = parsed.plans || [];
-        this.parkedCarts = parsed.parkedCarts || [];
-        this.cashMovements = parsed.cashMovements || [];
-        this.categories = parsed.categories || [];
+        this.applyStoredData(storedData);
       } else {
-        this.products = [];
-        this.sales = [];
-        this.tenants = [];
-        this.branches = [];
-        this.shifts = [];
-        this.movements = [];
-        this.categories = [];
-        this.users = [];
-        this.customers = [];
-        this.expenses = [];
-        this.plans = [];
-        this.parkedCarts = [];
-        this.cashMovements = [];
+        this.applyStoredData(null);
         this.saveState();
       }
+    } catch (e) {
+      this.applyStoredData(null);
+    }
+  }
+
+  /**
+   * Hydrate every record collection from a persisted data blob.
+   *
+   * `null` (first run) or an unreadable blob resets to the clean baseline —
+   * the same behaviour `loadState` has always had on a fresh start.
+   *
+   * Every collection passes through {@link hydrateIdentities}: the blob may
+   * carry a row under both its app id and its sync UUID (a second tab adopted
+   * an echo it could not resolve — see the helper's doc), and hydration is
+   * also where each surviving row's id binding gets registered for THIS
+   * session, so a later realtime echo resolves instead of duplicating.
+   */
+  private applyStoredData(raw: string | null): void {
+    try {
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed) throw new Error('no stored data');
+      this.products = hydrateIdentities(parsed.products || []);
+      this.sales = hydrateIdentities(parsed.sales || []);
+      this.tenants = hydrateIdentities(parsed.tenants || []);
+      this.branches = hydrateIdentities(parsed.branches || []);
+      this.shifts = hydrateIdentities(parsed.shifts || []);
+      this.movements = hydrateIdentities(parsed.movements || []);
+      this.users = hydrateIdentities(parsed.users || []);
+      this.customers = hydrateIdentities(parsed.customers || []);
+      this.expenses = hydrateIdentities(parsed.expenses || []);
+      this.plans = hydrateIdentities(parsed.plans || []);
+      this.parkedCarts = hydrateIdentities(parsed.parkedCarts || []);
+      this.cashMovements = hydrateIdentities(parsed.cashMovements || []);
+      this.categories = hydrateIdentities(parsed.categories || []);
     } catch (e) {
       this.products = [];
       this.sales = [];
@@ -235,6 +256,29 @@ class DatabaseService {
       this.cashMovements = [];
     }
   }
+
+  /**
+   * Re-hydrate from a write another tab made to the shared data blob and
+   * re-render subscribers. Browsers deliver `storage` only to the windows
+   * that did NOT make the write, so this can never loop — and it deliberately
+   * skips `notify()`, which would re-save the blob it just read.
+   *
+   * This is the realtime path for shift state: the cashier's "No Open Shift"
+   * indicator, the checkout gate and the sign-out gate all follow it without
+   * a refresh. `newValue === null` means the blob was cleared elsewhere, so
+   * fall back to the clean baseline.
+   */
+  private handleStorageEvent = (event: StorageEvent): void => {
+    if (event.key !== null && event.key !== STORAGE_KEY_DATA) return;
+    this.applyStoredData(event.newValue);
+    this.listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch (err) {
+        console.error('Error in database subscriber:', err);
+      }
+    });
+  };
 
   private saveState() {
     try {
@@ -885,6 +929,23 @@ class DatabaseService {
   }
 
   public addProduct(product: Omit<Product, 'id' | 'created_at'>): Product {
+    // Barcode uniqueness (per shop): a duplicate barcode would make checkout
+    // scans ambiguous — the same shelf symbol would ring up whichever product
+    // the lookup happens to find first. The Add/Edit product screens check
+    // this too, but the rule lives here so no code path can mint a duplicate.
+    // Blank barcodes are rejected as well: every product must be scannable.
+    const cleanBarcode = sanitizeBarcodeInput(product.barcode);
+    if (!cleanBarcode) {
+      throw new Error('A barcode is required — scan the product barcode or generate one.');
+    }
+    const conflict = findBarcodeConflict(this.products, cleanBarcode, product.tenant_id);
+    if (conflict) {
+      throw new Error(
+        `Barcode ${cleanBarcode} is already used by “${conflict.name}” in this shop.`
+      );
+    }
+    product = { ...product, barcode: cleanBarcode };
+
     // Category validation: must exist in this shop and be active
     let categoryName = product.category_name;
     if (product.category_id) {
@@ -948,6 +1009,29 @@ class DatabaseService {
   public updateProduct(productId: string, updates: Partial<Product>): boolean {
     const prod = this.products.find((p) => p.id === productId);
     if (!prod) return false;
+
+    // Reassigning the barcode: same uniqueness rule as registration (see
+    // addProduct). A barcode is what the till scans — two products sharing
+    // one would make checkout ambiguous. Blank barcodes are rejected: every
+    // product must stay scannable.
+    if (updates.barcode !== undefined) {
+      const cleanBarcode = sanitizeBarcodeInput(updates.barcode);
+      if (!cleanBarcode) {
+        throw new Error('A barcode is required — scan the product barcode or generate one.');
+      }
+      const conflict = findBarcodeConflict(
+        this.products,
+        cleanBarcode,
+        prod.tenant_id,
+        productId
+      );
+      if (conflict) {
+        throw new Error(
+          `Barcode ${cleanBarcode} is already used by “${conflict.name}” in this shop.`
+        );
+      }
+      updates = { ...updates, barcode: cleanBarcode };
+    }
 
     // Reassigning categories: target must be an active category of the same shop
     if (updates.category_id) {
@@ -1291,6 +1375,18 @@ class DatabaseService {
     items: { productId: string; quantity: number; discountPercent?: number }[];
     notes?: string;
   }): Sale {
+    // A till may only ring up a sale while its shift is open. Every drawer
+    // control — cash crediting, the Z-report, the sign-out gate — resolves
+    // against an open shift, and a sale recorded with none is unaccounted
+    // money. The POS disables checkout without one; this is the enforcement
+    // point that also covers any other caller.
+    const activeShift = this.shifts.find(
+      (s) => s.tenant_id === saleInput.tenant_id && s.status === 'open'
+    );
+    if (!activeShift) {
+      throw new Error('No open shift on this till — open a shift before making a sale.');
+    }
+
     let subtotal = 0;
     let totalDiscount = 0;
     let totalCost = 0;
@@ -1381,15 +1477,11 @@ class DatabaseService {
 
     this.sales.unshift(newSale);
 
-    // If sale was cash, update current shift cash
+    // If sale was cash, update current shift cash (the shift was resolved
+    // and required at the top of this method)
     if (saleInput.payment_method === 'cash') {
-      const activeShift = this.shifts.find(
-        (s) => s.tenant_id === saleInput.tenant_id && s.status === 'open'
-      );
-      if (activeShift) {
-        activeShift.cash_sales += total;
-        activeShift.expected_cash += total;
-      }
+      activeShift.cash_sales += total;
+      activeShift.expected_cash += total;
     }
 
     if (this.supabaseClient) {
@@ -1496,6 +1588,92 @@ class DatabaseService {
     }
     this.notify();
     return true;
+  }
+
+  /**
+   * Save the fields of **Supermarket Store Settings**: the legal name, the
+   * address and phone printed on receipts, the receipt footer note, and the
+   * shop's profile photo.
+   *
+   * Two writes happen on purpose. The mirror row is patched and notified first,
+   * so this device renders the new profile immediately (and the draft stays
+   * offline-capable), and the same columns are then pushed to `tenants`. That
+   * table is in the realtime publication (20261030000002) and every session
+   * subscribes to it, so the UPDATE folds into every open till through
+   * `handleRealtimeTenant` — an owner's save reaches cashiers without a reload,
+   * which is the whole point of the settings page being described as "live on
+   * cashier tills". The photo travels in that same row, which is what carries
+   * it on to the customer display (App.tsx publishes it over the
+   * BroadcastChannel the popup window listens on).
+   *
+   * A partial `.update(patch)` is used rather than a full-row upsert: this is
+   * an edit of a row that already exists, and client INSERT on `tenants` is
+   * deliberately not granted (20261029000001 §8).
+   */
+  public updateStoreProfile(
+    tenantId: string,
+    profile: {
+      name: string;
+      address: string;
+      phone: string;
+      receipt_footer: string;
+      logo_url: string;
+    }
+  ): { ok: boolean; message: string } {
+    if (!canManageStoreProfile(this.currentUser, tenantId)) {
+      return { ok: false, message: 'Only this shop’s owner can change the store profile.' };
+    }
+    const tenant = this.tenants.find((item) => item.id === tenantId);
+    if (!tenant) {
+      return { ok: false, message: 'This shop is not loaded on this device yet. Reload and retry.' };
+    }
+
+    const name = profile.name.trim();
+    if (!name) {
+      return { ok: false, message: 'Enter the store legal name that appears on receipts.' };
+    }
+    if (
+      name.length > 120 ||
+      profile.address.length > 240 ||
+      profile.phone.length > 40 ||
+      profile.receipt_footer.length > 300
+    ) {
+      return {
+        ok: false,
+        message: 'One of the store profile fields is too long. Shorten it and retry.',
+      };
+    }
+    // Photos are compressed to a small JPEG before they get here (src/lib/image.ts),
+    // so this only fires on a file that somehow skipped that step — worth
+    // saying plainly rather than letting a huge row crawl through sync.
+    if (profile.logo_url.length > 400_000) {
+      return {
+        ok: false,
+        message: 'That photo is too large to sync. Choose a smaller image and retry.',
+      };
+    }
+
+    const trimmed = {
+      name,
+      address: profile.address.trim(),
+      phone: profile.phone.trim(),
+      receipt_footer: profile.receipt_footer.trim(),
+    };
+    // The mirror keeps `undefined` for "no photo" (the optional field's own
+    // shape); the database column takes NULL for exactly the same thing.
+    Object.assign(tenant, { ...trimmed, logo_url: profile.logo_url || undefined });
+
+    if (this.supabaseClient) {
+      syncTenantStatus(this.supabaseClient, tenantId, {
+        ...trimmed,
+        logo_url: profile.logo_url || null,
+      });
+    }
+    this.notify();
+    return {
+      ok: true,
+      message: 'Store profile saved. Open tills and the customer display update live.',
+    };
   }
 
   // --- Shifts ---
@@ -1676,7 +1854,25 @@ class DatabaseService {
     return this.users.filter((u) => u.tenant_id === tenantId);
   }
 
-  public addUser(user: Omit<UserAccount, 'id' | 'created_at'>): UserAccount {
+  /**
+   * Create the Auth login and database membership before adding the local
+   * roster row. Without Supabase, retain the device-local account flow.
+   */
+  public provisionStaffLogin(params: {
+    tenantId: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    password: string;
+    role: 'cashier' | 'shop_owner';
+  }): Promise<StaffProvisionResult | { ok: true; userId?: string }> {
+    if (!this.supabaseClient) return Promise.resolve({ ok: true });
+    return provisionStaffWithSupabase(this.supabaseClient, params);
+  }
+
+  public addUser(
+    user: Omit<UserAccount, 'id' | 'created_at'> & { id?: string }
+  ): UserAccount {
     // A privileged role may only be minted by an authenticated super admin.
     // Client-supplied roles are not trusted: if a non-super-admin session (or a
     // tampered client) asks to create a `super_admin`, the role is coerced down
@@ -1692,9 +1888,18 @@ class DatabaseService {
       role,
       // Random suffix: two staff saved inside the same millisecond would
       // otherwise share an id, and Delete/Disable would hit the wrong row.
-      id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: user.id ?? `user-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       created_at: new Date().toISOString(),
     };
+    if (user.id) {
+      const existing = this.users.find((candidate) => candidate.id === user.id);
+      if (existing) {
+        Object.assign(existing, newUser, { created_at: existing.created_at });
+        if (this.currentUser?.id === existing.id) this.setCurrentUser(existing);
+        else this.notify();
+        return existing;
+      }
+    }
     this.users.unshift(newUser);
     if (this.supabaseClient) {
       syncUser(this.supabaseClient, newUser);
