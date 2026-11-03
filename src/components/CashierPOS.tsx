@@ -33,6 +33,7 @@ import { formatGHS, calculateCartTotals, calculateCashChange } from '../lib/mone
 import { playScannerBeep, playSaleChime } from '../lib/sound';
 import { findProductByBarcode } from '../lib/barcode';
 import { useTerminalSettings } from '../lib/terminalSettings';
+import { useCustomerDisplayConnection } from '../lib/customerDisplayStatus';
 import { ReceiptPrinterModal } from './ReceiptPrinterModal';
 import { Product, CartItem, Sale, Tenant, CashRegisterShift, ParkedCart } from '../types';
 import { db } from '../lib/supabaseClient';
@@ -74,6 +75,10 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
 }) => {
   // Navigation Tabs for Cashier
   const [activeTab, setActiveTab] = useState<'pos' | 'history' | 'checker' | 'shift'>('pos');
+
+  // Live customer-display connection status (dual-screen) — drives the
+  // sidebar status row and doubles as the reopen/reconnect affordance.
+  const displayConnection = useCustomerDisplayConnection();
 
   // POS State
   const [searchQuery, setSearchQuery] = useState('');
@@ -676,11 +681,50 @@ export const CashierPOS: React.FC<CashierPOSProps> = ({
         <div className="p-3 border-t border-slate-800 bg-slate-900/60 space-y-2.5">
           <button
             onClick={onOpenCustomerDisplay}
+            title={
+              displayConnection === 'connected'
+                ? 'Customer display is live — click to focus it'
+                : 'Open / reconnect the customer display window'
+            }
             className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition"
           >
             <Monitor className="w-3.5 h-3.5 text-[#F28C28]" />
             <span>Dual Customer Screen</span>
           </button>
+
+          {/* Connection status: the display heartbeats every few seconds, so
+              this reflects reality — and clicking it reopens a window the
+              cashier (or Windows) closed. Checkout never depends on it. */}
+          <p
+            className={`flex items-center gap-1.5 text-[10px] font-bold ${
+              displayConnection === 'connected'
+                ? 'text-emerald-400'
+                : displayConnection === 'blocked'
+                  ? 'text-amber-400'
+                  : 'text-slate-400'
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                displayConnection === 'connected'
+                  ? 'bg-emerald-400 animate-pulse'
+                  : displayConnection === 'connecting'
+                    ? 'bg-amber-400 animate-pulse'
+                    : displayConnection === 'blocked'
+                      ? 'bg-amber-500'
+                      : 'bg-slate-500'
+              }`}
+            />
+            {displayConnection === 'connected'
+              ? 'Customer screen live'
+              : displayConnection === 'connecting'
+                ? 'Customer screen opening…'
+                : displayConnection === 'blocked'
+                  ? 'Blocked — click to allow'
+                  : displayConnection === 'off'
+                    ? 'Dual screen off (opens on click)'
+                    : 'Customer screen not open'}
+          </p>
 
           <div className="flex items-center gap-2.5 pt-1">
             <div className="w-8 h-8 rounded-full bg-orange-500/20 text-[#F28C28] font-black text-xs flex items-center justify-center">

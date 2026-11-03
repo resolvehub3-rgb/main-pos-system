@@ -113,7 +113,8 @@ in-app "Install app" button shows the right instructions per platform).
   operator drags to the second monitor; the cart syncs live over
   `BroadcastChannel`. Browsers cannot auto-open windows at startup (no user
   gesture ⇒ popup blocked), and if popups are disabled the in-page modal is
-  used instead.
+  used instead. See `docs/DUAL-SCREEN.md` for the full dual-screen setup,
+  Windows 10/11 steps and recovery.
 - **Second monitor / taskbar:** the installed PWA opens in its own window and
   can be placed on the customer monitor manually; browsers do not offer
   Electron-style multi-window startup positioning, background services or

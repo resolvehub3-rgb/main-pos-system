@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {buildCustomerDisplayState, cartToCustomerItems} from './customerDisplay.ts';
+import {calculateCartTotals} from './money.ts';
 import type {CartItem, Product} from '../types';
 
 const product = (overrides: Partial<Product> = {}): Product => ({
@@ -27,6 +28,15 @@ const cartItem = (overrides: Partial<CartItem> = {}): CartItem => ({
   ...overrides,
 });
 
+const totalsFor = (items: CartItem[]) =>
+  calculateCartTotals(
+    items.map((c) => ({
+      price: c.product.selling_price,
+      quantity: c.quantity,
+      discountPercent: c.discount_percent,
+    })),
+  );
+
 test('cartToCustomerItems keeps only customer-facing fields', () => {
   const items = cartToCustomerItems([cartItem()]);
   assert.deepEqual(items, [
@@ -36,6 +46,8 @@ test('cartToCustomerItems keeps only customer-facing fields', () => {
       imageUrl: 'https://example.com/milk.png',
       unitPrice: 12.5,
       quantity: 2,
+      lineTotal: 25,
+      discountPercent: 0,
     },
   ]);
 });
@@ -51,34 +63,79 @@ test('cartToCustomerItems handles an empty cart', () => {
   assert.deepEqual(cartToCustomerItems([]), []);
 });
 
-test('buildCustomerDisplayState carries shop name, projected lines and total', () => {
-  const state = buildCustomerDisplayState('Accra Mall Supermarket', [cartItem()], 25);
+test('cartToCustomerItems applies the line discount to the line total', () => {
+  const [item] = cartToCustomerItems([cartItem({discount_percent: 10})]);
+  assert.equal(item.discountPercent, 10);
+  // 12.50 × 2 = 25.00 less 10% → 22.50, rounded like the till rounds it.
+  assert.equal(item.lineTotal, 22.5);
+});
+
+test('buildCustomerDisplayState carries shop name, projected lines and totals', () => {
+  const cart = [cartItem()];
+  const state = buildCustomerDisplayState('Accra Mall Supermarket', cart, totalsFor(cart));
   assert.equal(state.tenantName, 'Accra Mall Supermarket');
+  assert.equal(state.subtotal, 25);
+  assert.equal(state.discountTotal, 0);
+  assert.equal(state.taxTotal, 0);
   assert.equal(state.totalAmount, 25);
   assert.equal(state.items.length, 1);
   assert.equal(state.items[0].quantity, 2);
 });
 
+test('buildCustomerDisplayState reports discounts exactly like the till panel', () => {
+  const cart = [cartItem({discount_percent: 10})];
+  const state = buildCustomerDisplayState('Zen Mart', cart, totalsFor(cart));
+  assert.equal(state.subtotal, 25);
+  assert.equal(state.discountTotal, 2.5);
+  assert.equal(state.taxTotal, 0);
+  assert.equal(state.totalAmount, 22.5);
+});
+
 test('buildCustomerDisplayState for an empty cart projects no lines', () => {
-  const state = buildCustomerDisplayState('', [], 0);
+  const state = buildCustomerDisplayState('', [], calculateCartTotals([]));
   assert.deepEqual(state.items, []);
+  assert.equal(state.subtotal, 0);
   assert.equal(state.totalAmount, 0);
+  assert.equal('payment' in state, false);
 });
 
 test('buildCustomerDisplayState carries the shop photo to the customer screen', () => {
   const logo = 'data:image/jpeg;base64,dGVzdA==';
-  assert.equal(buildCustomerDisplayState('Zen Mart', [], 0, logo).tenantLogo, logo);
+  assert.equal(
+    buildCustomerDisplayState('Zen Mart', [], calculateCartTotals([]), logo).tenantLogo,
+    logo,
+  );
 
   // No photo → the key is absent rather than an empty string, so the display
   // keeps its branded placeholder instead of rendering a broken <img>.
-  const plain = buildCustomerDisplayState('Zen Mart', [], 0);
+  const plain = buildCustomerDisplayState('Zen Mart', [], calculateCartTotals([]));
   assert.equal('tenantLogo' in plain, false);
-  assert.equal(buildCustomerDisplayState('Zen Mart', [], 0, '').tenantLogo, undefined);
+  assert.equal(
+    buildCustomerDisplayState('Zen Mart', [], calculateCartTotals([]), '').tenantLogo,
+    undefined,
+  );
 
   // The projection still leaks nothing internal — the logo is the only tenant
   // field that crosses the channel alongside the name.
   const serialized = JSON.stringify(plain);
   for (const forbidden of ['cost_price', 'tenant_id', 'barcode', 'logo_url']) {
+    assert.equal(serialized.includes(forbidden), false, `leaked ${forbidden}`);
+  }
+});
+
+test('buildCustomerDisplayState carries a payment confirmation and nothing else internal', () => {
+  const state = buildCustomerDisplayState('Zen Mart', [], calculateCartTotals([]), undefined, {
+    method: 'cash',
+    amount: 50,
+    changeDue: 2.5,
+    paidAt: '2026-11-02T10:00:00.000Z',
+  });
+  assert.equal(state.payment?.method, 'cash');
+  assert.equal(state.payment?.amount, 50);
+  assert.equal(state.payment?.changeDue, 2.5);
+
+  const serialized = JSON.stringify(state);
+  for (const forbidden of ['cost_price', 'tenant_id', 'barcode', 'pin', 'password']) {
     assert.equal(serialized.includes(forbidden), false, `leaked ${forbidden}`);
   }
 });

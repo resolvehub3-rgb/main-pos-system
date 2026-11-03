@@ -55,6 +55,7 @@ import { db } from '../lib/supabaseClient';
 import { playScannerBeep } from '../lib/sound';
 import { useTerminalSettings, updateTerminalSettings } from '../lib/terminalSettings';
 import { DEFAULT_RECEIPT_FOOTER, receiptFooterText } from '../lib/receiptFooter';
+import { DualScreenSetup } from './DualScreenSetup';
 import { assertImageFile, compressImage, readFileAsDataUrl } from '../lib/image';
 import {
   checkBridge,
@@ -82,6 +83,8 @@ interface ShopOwnerDashboardProps {
   products: Product[];
   onOpenAddProduct: () => void;
   onOpenPOS: () => void;
+  /** Open / reopen the customer display window from Dual-Screen Setup. */
+  onOpenCustomerDisplay: () => void;
 }
 
 /** Draft of the **Supermarket Store Settings** form, seeded from the tenant. */
@@ -103,6 +106,7 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   products,
   onOpenAddProduct,
   onOpenPOS,
+  onOpenCustomerDisplay,
 }) => {
   const [activeMenu, setActiveMenu] = useState<
     | 'overview'
@@ -2185,6 +2189,9 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Dual-Screen Setup — customer display on a second monitor */}
+          <DualScreenSetup onOpenCustomerDisplay={onOpenCustomerDisplay} />
           </div>
         )}
 

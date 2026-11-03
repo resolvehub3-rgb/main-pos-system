@@ -87,6 +87,31 @@ export interface CustomerDisplayItem {
   imageUrl: string;
   unitPrice: number;
   quantity: number;
+  /**
+   * What this line costs after its own discount (unit price × quantity −
+   * line discount) — the figure the customer sees on the right of the row.
+   */
+  lineTotal: number;
+  /** Line discount percent the cashier applied (0 when none). */
+  discountPercent: number;
+}
+
+/**
+ * Payment confirmation pushed to the customer display once the existing
+ * checkout process has actually committed the sale (App.handleCompleteSale →
+ * db.processSale). It is projected from the sale the till already produced —
+ * the customer screen never runs a payment of its own.
+ */
+export interface CustomerDisplayPayment {
+  method: PaymentMethod;
+  /** Total the customer paid for the sale. */
+  amount: number;
+  /** Change handed back (cash payments only, when applicable). */
+  changeDue?: number;
+  /** Short operator reference when the payment method carries one (MoMo/card). */
+  reference?: string;
+  /** ISO timestamp of the completed sale. */
+  paidAt: string;
 }
 
 /**
@@ -105,7 +130,20 @@ export interface CustomerDisplayState {
    */
   tenantLogo?: string;
   items: CustomerDisplayItem[];
+  /** Sum of the cart lines before discounts — the till's own subtotal. */
+  subtotal: number;
+  /** Total discounts applied to this sale (line discounts included). */
+  discountTotal: number;
+  /** Tax applied to this sale (0.00 where the till charges none). */
+  taxTotal: number;
+  /** Amount due: subtotal − discounts + tax. */
   totalAmount: number;
+  /**
+   * Present only while the customer should see the "payment received"
+   * confirmation for the sale that just completed; omitted otherwise so the
+   * screen stays a pure read-only mirror of the active cart.
+   */
+  payment?: CustomerDisplayPayment;
 }
 
 export type PaymentMethod = 'cash' | 'mobile_money' | 'card' | 'split' | 'bank_transfer' | 'other';

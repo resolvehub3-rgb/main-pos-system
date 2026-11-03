@@ -1,21 +1,23 @@
 import React from 'react';
-import { X, ShoppingCart, Store, CheckCircle2 } from 'lucide-react';
-import { formatGHS } from '../lib/money';
-import { CustomerDisplayItem } from '../types';
+import {
+  X,
+  ShoppingCart,
+  Store,
+  CheckCircle2,
+  Maximize2,
+  Minimize2,
+  Tag,
+} from 'lucide-react';
+import {formatGHS} from '../lib/money';
+import type {CustomerDisplayPayment, CustomerDisplayState} from '../types';
 
 interface CustomerDisplayModalProps {
-  /** Shop name shown in the header (customer-facing only). */
-  tenantName: string;
   /**
-   * Shop photo as a compressed data-URL — the same value the owner saved in
-   * Store Settings. Omitted when the shop has none, and the header then keeps
-   * its branded placeholder tile.
+   * The full customer projection (see src/lib/customerDisplay.ts): shop
+   * identity, cart lines, subtotal/discount/tax/amount due and the optional
+   * payment confirmation. Nothing internal ever travels in this object.
    */
-  tenantLogo?: string;
-  /** Projected cart lines — see src/lib/customerDisplay.ts. */
-  items: CustomerDisplayItem[];
-  /** Amount due, straight from the cashier's calculateCartTotals. */
-  totalAmount: number;
+  state: CustomerDisplayState;
   /**
    * Dismiss handler for the close (X) button in the header.
    *
@@ -25,23 +27,62 @@ interface CustomerDisplayModalProps {
    * omits it — customers must not be able to close that screen.
    */
   onClose?: () => void;
+  /**
+   * Renders the operator's one-click full-screen control (second-monitor
+   * window only). Full-screen needs a gesture in that window, so the button
+   * is the honest activation path — never a hidden hack.
+   */
+  fullscreenControl?: boolean;
+  /** Whether the host window is currently full-screen (toggles the icon). */
+  isFullscreen?: boolean;
+  /** Toggle handler for the full-screen control. */
+  onToggleFullscreen?: () => void;
+  /**
+   * Honest notice shown next to the full-screen control when the browser
+   * refuses it (it can never be forced). Null/undefined → nothing shown.
+   */
+  fullscreenHint?: string | null;
+  /**
+   * Live link indicator for the second-monitor window: false when no state
+   * has arrived from the till for a while (cashier closed / reloaded).
+   */
+  linkLive?: boolean;
 }
+
+const PAYMENT_LABELS: Record<CustomerDisplayPayment['method'], string> = {
+  cash: 'Cash',
+  mobile_money: 'Mobile Money',
+  card: 'Card',
+  split: 'Split Payment',
+  bank_transfer: 'Bank Transfer',
+  other: 'Other',
+};
 
 /**
  * The customer-facing screen.
  *
  * One component, two hosts: the in-page preview modal (single-monitor
  * fallback) and the second-monitor popup window (`CustomerDisplayWindow`).
- * It only ever receives the narrow
- * customer projection — never internal product or tenant data.
+ * It only ever receives the narrow customer projection — never internal
+ * product or tenant data — and it is strictly read-only: there is no control
+ * here that can change the sale, only display-level affordances (close on the
+ * preview, full-screen on the second monitor).
+ *
+ * Sized for a monitor facing the customer: large figures, high contrast on
+ * the SamTill navy/orange brand, line totals and the amount due readable
+ * from across the counter.
  */
 export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
-  tenantName,
-  tenantLogo,
-  items,
-  totalAmount,
+  state,
   onClose,
+  fullscreenControl,
+  isFullscreen,
+  onToggleFullscreen,
+  fullscreenHint,
+  linkLive,
 }) => {
+  const {tenantName, tenantLogo, items, subtotal, discountTotal, taxTotal, totalAmount, payment} = state;
+
   return (
     <div className="fixed inset-0 z-50 bg-[#102A4C] text-white flex flex-col justify-between p-6 sm:p-10">
       {/* Header */}
@@ -64,15 +105,47 @@ export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
           </div>
         </div>
 
-        {onClose && (
-          <button
-            onClick={onClose}
-            aria-label="Close Customer Display"
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Second-monitor link indicator (display-level, never business data) */}
+          {linkLive !== undefined && (
+            <span
+              className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border ${
+                linkLive
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${linkLive ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              {linkLive ? 'Live' : 'Waiting for the till…'}
+            </span>
+          )}
+
+          {fullscreenControl && onToggleFullscreen && (
+            <button
+              onClick={onToggleFullscreen}
+              aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}
+              title={isFullscreen ? 'Exit full screen' : 'Full screen'}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+            >
+              {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+            </button>
+          )}
+          {fullscreenHint && fullscreenControl && (
+            <span className="hidden sm:inline text-[11px] text-amber-300 max-w-[16rem] text-right">
+              {fullscreenHint}
+            </span>
+          )}
+
+          {onClose && (
+            <button
+              onClick={onClose}
+              aria-label="Close Customer Display"
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Main Scanned Items Stream */}
@@ -90,21 +163,27 @@ export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
                 key={item.id}
                 className="flex items-center justify-between p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80"
               >
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 min-w-0">
                   <img
                     src={item.imageUrl}
                     alt={item.name}
-                    className="w-14 h-14 rounded-xl object-cover border border-slate-700"
+                    className="w-14 h-14 rounded-xl object-cover border border-slate-700 flex-shrink-0"
                   />
-                  <div>
-                    <h3 className="text-base font-bold text-white">{item.name}</h3>
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-white truncate">{item.name}</h3>
                     <p className="text-xs text-slate-400">
-                      {item.quantity} x {formatGHS(item.unitPrice)}
+                      {item.quantity} &times; {formatGHS(item.unitPrice)}
                     </p>
+                    {item.discountPercent > 0 && (
+                      <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px] font-bold">
+                        <Tag className="w-3 h-3" />
+                        {item.discountPercent}% off
+                      </span>
+                    )}
                   </div>
                 </div>
-                <span className="text-lg font-black text-[#F28C28]">
-                  {formatGHS(item.unitPrice * item.quantity)}
+                <span className="text-lg font-black text-[#F28C28] ml-3 whitespace-nowrap">
+                  {formatGHS(item.lineTotal)}
                 </span>
               </div>
             ))}
@@ -112,23 +191,71 @@ export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
         )}
       </div>
 
-      {/* Big Customer Total Bar */}
-      <div className="max-w-4xl mx-auto w-full p-6 bg-slate-800 rounded-2xl border border-slate-700 flex items-center justify-between shadow-2xl">
-        <div>
-          <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Amount Due</span>
-          <p className="text-3xl sm:text-4xl font-black text-white mt-1">
-            {formatGHS(totalAmount)}
-          </p>
+      {/* Totals / payment confirmation bar */}
+      {payment ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="max-w-4xl mx-auto w-full p-6 bg-emerald-600/90 rounded-2xl border border-emerald-400/40 flex items-center justify-between shadow-2xl"
+        >
+          <div className="flex items-center gap-4">
+            <CheckCircle2 className="w-12 h-12 text-white" />
+            <div>
+              <span className="text-xs font-bold uppercase tracking-widest text-emerald-100">
+                Payment Received — Thank You!
+              </span>
+              <p className="text-3xl sm:text-4xl font-black text-white mt-1">
+                {formatGHS(payment.amount)}
+              </p>
+            </div>
+          </div>
+          <div className="text-right text-white">
+            <p className="text-sm font-bold uppercase tracking-wide">
+              {PAYMENT_LABELS[payment.method]}
+              {payment.reference ? ` • ${payment.reference}` : ''}
+            </p>
+            {payment.changeDue !== undefined && payment.changeDue > 0 && (
+              <p className="text-lg font-black mt-1">Change: {formatGHS(payment.changeDue)}</p>
+            )}
+          </div>
         </div>
-
-        <div className="text-right">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Ready for Payment</span>
-          </span>
-          <p className="text-[11px] text-slate-400 mt-1">Cash • MoMo • Visa / Mastercard</p>
+      ) : (
+        <div className="max-w-4xl mx-auto w-full p-6 bg-slate-800 rounded-2xl border border-slate-700 flex items-center justify-between shadow-2xl">
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-8 text-sm text-slate-300 font-semibold">
+              <span>Subtotal</span>
+              <span>{formatGHS(subtotal)}</span>
+            </div>
+            {discountTotal > 0 && (
+              <div className="flex items-center justify-between gap-8 text-sm text-amber-300 font-bold">
+                <span>Discount</span>
+                <span>&minus; {formatGHS(discountTotal)}</span>
+              </div>
+            )}
+            {taxTotal > 0 && (
+              <div className="flex items-center justify-between gap-8 text-sm text-slate-300 font-semibold">
+                <span>Tax</span>
+                <span>{formatGHS(taxTotal)}</span>
+              </div>
+            )}
+            <div className="pt-2 border-t border-slate-700 flex items-center justify-between gap-8">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                  Amount Due
+                </span>
+                <p className="text-3xl sm:text-4xl font-black text-white mt-1">{formatGHS(totalAmount)}</p>
+              </div>
+              <div className="text-right">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Ready for Payment</span>
+                </span>
+                <p className="text-[11px] text-slate-400 mt-1">Cash • MoMo • Visa / Mastercard</p>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

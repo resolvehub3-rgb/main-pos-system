@@ -32,6 +32,32 @@ body,
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }
+
+  /* Desktop kiosk window (installed app): the window IS the app — no
+     rubber-band scrolling past the layout, so the till feels like a native
+     full-screen application rather than a web page. */
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+}
+
+/* Same treatment while the Fullscreen API has the app filling a monitor.
+   Esc (or the header button) leaves this state — OS/browser controls are
+   never intercepted. */
+html:fullscreen,
+html:-webkit-full-screen {
+  overscroll-behavior: none;
+  background: #f5f7fa;
+}
+
+/* Collapsible panels (<summary>) in the settings: drop the UA's disclosure
+   triangle so the ChevronDown icon is the only affordance. */
+summary::-webkit-details-marker {
+  display: none;
+}
+summary {
+  list-style: none;
 }
 
 /* Enforce Montserrat across all form controls and typography */

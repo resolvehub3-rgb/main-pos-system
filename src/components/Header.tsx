@@ -12,9 +12,15 @@ import {
   CheckCircle2,
   Mail,
   Phone,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { UserRole, UserAccount } from '../types';
 import { InstallApp } from './InstallApp';
+import {
+  customerDisplayConnectionLabel,
+  type CustomerDisplayConnection,
+} from '../lib/customerDisplayStatus';
 
 interface HeaderProps {
   currentUser: UserAccount;
@@ -23,8 +29,45 @@ interface HeaderProps {
   onShopChange: (shopId: string) => void;
   onOpenSupabaseModal: () => void;
   onOpenCustomerDisplay: () => void;
+  /** Live customer-display connection status (dual-screen setup). */
+  customerDisplayStatus: CustomerDisplayConnection;
+  /** Enter/exit full-screen (kiosk) mode on the till window. */
+  onToggleFullscreen: () => void;
+  /** Whether the till window is currently full-screen. */
+  fullscreenActive: boolean;
   isConnectedToSupabase: boolean;
   onLogout: () => void;
+}
+
+/** Compact chip styling per connection status (`null` → hide the chip). */
+function displayChip(status: CustomerDisplayConnection): {
+  text: string;
+  className: string;
+} | null {
+  switch (status) {
+    case 'connected':
+      return {
+        text: 'Customer Display Live',
+        className: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10',
+      };
+    case 'connecting':
+      return {
+        text: 'Customer Display Connecting',
+        className: 'text-amber-300 border-amber-500/40 bg-amber-500/10',
+      };
+    case 'blocked':
+      return {
+        text: 'Customer Display Blocked',
+        className: 'text-amber-300 border-amber-500/40 bg-amber-500/10',
+      };
+    case 'not-open':
+      return {
+        text: 'Customer Display Not Open',
+        className: 'text-slate-300 border-slate-600 bg-slate-800/70',
+      };
+    case 'off':
+      return null; // dual-screen disabled → no chip clutter
+  }
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -34,6 +77,9 @@ export const Header: React.FC<HeaderProps> = ({
   onShopChange,
   onOpenSupabaseModal,
   onOpenCustomerDisplay,
+  customerDisplayStatus,
+  onToggleFullscreen,
+  fullscreenActive,
   isConnectedToSupabase,
   onLogout,
 }) => {
@@ -85,6 +131,12 @@ export const Header: React.FC<HeaderProps> = ({
       .toUpperCase()
       .slice(0, 2);
   };
+
+  // Customer-display status chip (the super admin keeps its own preview
+  // button below; cashiers and owners get the live connection chip, which
+  // doubles as the reopen/reconnect control).
+  const displayStatusChip =
+    currentRole !== 'super_admin' ? displayChip(customerDisplayStatus) : null;
 
   return (
     <header className="sticky top-0 z-40 bg-[#102A4C] text-white border-b border-slate-700/60 shadow-md">
@@ -160,6 +212,36 @@ export const Header: React.FC<HeaderProps> = ({
               />
             </div>
           )}
+
+          {/* Customer display status → click to open / reconnect */}
+          {displayStatusChip && (
+            <button
+              onClick={onOpenCustomerDisplay}
+              title={customerDisplayConnectionLabel(customerDisplayStatus)}
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition hover:brightness-110 ${displayStatusChip.className}`}
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">{displayStatusChip.text}</span>
+            </button>
+          )}
+
+          {/* Full-screen kiosk mode: one click in the installed app or a tab.
+              Esc / the browser's own controls always exit it. */}
+          <button
+            onClick={onToggleFullscreen}
+            title={fullscreenActive ? 'Exit full screen' : 'Enter full screen'}
+            aria-label={fullscreenActive ? 'Exit full screen' : 'Enter full screen'}
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-medium transition"
+          >
+            {fullscreenActive ? (
+              <Minimize2 className="w-3.5 h-3.5 text-[#F28C28]" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5 text-[#F28C28]" />
+            )}
+            <span className="hidden xl:inline">
+              {fullscreenActive ? 'Exit Full Screen' : 'Full Screen'}
+            </span>
+          </button>
 
           {/* Install SamTill as an app (browser install prompt / help) */}
           <InstallApp />
