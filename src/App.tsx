@@ -32,14 +32,8 @@ import {
   openCustomerDisplayWindow,
 } from './lib/dualScreen';
 import { getDualScreenSettings, useDualScreenSettings } from './lib/dualScreenSettings';
-import {
-  exitAppFullscreen,
-  isFullscreenActive,
-  isFullscreenSupported,
-  requestAppFullscreen,
-  useFullscreenActive,
-} from './lib/fullscreen';
 import { isStandalone } from './lib/pwa';
+import { tryMaximizeWindow } from './lib/windowMaximize';
 import { clearActiveCart, loadActiveCart, saveActiveCart } from './lib/cartPersist';
 import { ArrowLeft, Store } from 'lucide-react';
 
@@ -65,12 +59,14 @@ export default function App() {
   // Dual-screen / kiosk preferences for this device (owner-configured).
   const dualScreenSettings = useDualScreenSettings();
   // Whether the till window is currently in full-screen (kiosk) mode.
-  const fullscreenActive = useFullscreenActive();
+  // Full-screen (kiosk) activation is no longer used: SamTill opens as a
+  // maximized standalone PWA window with the native Windows title bar and
+  // taskbar (see src/lib/windowMaximize.ts + docs/DUAL-SCREEN.md). No browser
+  // Fullscreen API is invoked anywhere.
   // One-shot activation notices: browsers refuse full-screen / popups without
   // a gesture, so each is attempted once automatically and then offered as a
   // one-click notice (dismissed for this session only).
-  const [fullscreenNotice, setFullscreenNotice] = useState<boolean>(false);
-  const [fullscreenNoticeDismissed, setFullscreenNoticeDismissed] = useState<boolean>(false);
+  // Full-screen kiosk notices removed (maximized PWA window instead).
   const [blockedNoticeDismissed, setBlockedNoticeDismissed] = useState<boolean>(false);
   // Timestamp of the last customer-display heartbeat (connection status).
   const displayLastAliveRef = useRef<number>(0);
@@ -364,7 +360,6 @@ export default function App() {
   const displayTargetRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
   const displayPollRef = useRef<number | null>(null);
   const autoDisplayAttemptedRef = useRef<boolean>(false);
-  const autoFullscreenAttemptedRef = useRef<boolean>(false);
 
   // Drop the handle as soon as the operator closes the popup, so the next
   // click re-opens it instead of focusing a dead window.
@@ -478,38 +473,23 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [customerDisplayWindow, dualScreenSettings.enabled]);
 
-  // --- Full-screen (kiosk) activation -------------------------------------
-  // Browsers require a user gesture for full-screen, so the automatic attempt
-  // below is honest: in the installed app a refusal raises the one-click
-  // notice, and in a browser tab the header button is always available.
+  // --- Best-effort maximized window on launch -------------------------------
+  // Installed PWAs open in a standalone window (no address bar/tabs). True
+  // programmatic maximization is not available to web code, so we attempt the
+  // only supported nudge (resizeTo/moveTo) once; the browser/OS otherwise
+  // restores the last window state, which becomes maximized after the first
+  // manual maximize. See src/lib/windowMaximize.ts and docs/DUAL-SCREEN.md.
+  const maximizedOnceRef = useRef<boolean>(false);
   useEffect(() => {
-    if (!posScreenOpen || autoFullscreenAttemptedRef.current) return;
-    if (!getDualScreenSettings().auto_fullscreen) return;
-    if (!isFullscreenSupported() || isFullscreenActive()) return;
-    autoFullscreenAttemptedRef.current = true;
-    void requestAppFullscreen().then((result) => {
-      if ((result === 'denied' || result === 'failed') && isStandalone()) {
-        setFullscreenNotice(true);
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posScreenOpen]);
-
-  const toggleFullscreen = (): void => {
-    if (isFullscreenActive()) {
-      void exitAppFullscreen();
-    } else {
-      void requestAppFullscreen().then((result) => {
-        if (result === 'denied' || result === 'failed') setFullscreenNotice(true);
-      });
-    }
-  };
+    if (maximizedOnceRef.current) return;
+    maximizedOnceRef.current = true;
+    tryMaximizeWindow();
+  }, []);
 
   // A customer window belongs to exactly one till session: when the operator
   // signs out (or a different user signs in on this window) close it, so the
   // next session opens its own scoped window instead of focusing a screen
-  // that would never receive its cart again. Signing out also leaves kiosk
-  // full-screen behind — the sign-in page is a normal page.
+  // that would never receive its cart again.
   const previousUserIdRef = useRef<string | null>(currentUser?.id ?? null);
   useEffect(() => {
     const userId = currentUser?.id ?? null;
@@ -525,13 +505,9 @@ export default function App() {
     }
     setCustomerDisplayWindow(null);
     autoDisplayAttemptedRef.current = false;
-    autoFullscreenAttemptedRef.current = false;
-    setFullscreenNotice(false);
-    setFullscreenNoticeDismissed(false);
     setBlockedNoticeDismissed(false);
     setCustomerPayment(null);
     setCustomerDisplayConnection(getDualScreenSettings().enabled ? 'not-open' : 'off');
-    if (!userId) void exitAppFullscreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, customerDisplayWindow]);
 
@@ -570,8 +546,6 @@ export default function App() {
         onOpenSupabaseModal={() => setShowSupabaseModal(true)}
         onOpenCustomerDisplay={openCustomerDisplay}
         customerDisplayStatus={displayConnection}
-        onToggleFullscreen={toggleFullscreen}
-        fullscreenActive={fullscreenActive}
         isConnectedToSupabase={supabaseConfig.isConnected}
         onLogout={handleLogout}
       />
@@ -582,28 +556,6 @@ export default function App() {
       {/* Offline notice: the app keeps working from the local mirror */}
       <OfflineBanner />
 
-      {/* Full-screen kiosk activation: browsers need a gesture, so when the
-          automatic attempt in the installed app is refused we ask once. */}
-      {fullscreenNotice && !fullscreenNoticeDismissed && !fullscreenActive && (
-        <KioskNotice
-          tone="info"
-          message="Full-screen kiosk mode is available — enter full screen to use the whole monitor."
-          actions={[
-            {
-              label: 'Enter full screen',
-              primary: true,
-              onClick: () => {
-                void requestAppFullscreen().then((result) => {
-                  if (result === 'entered' || result === 'already-fullscreen') {
-                    setFullscreenNotice(false);
-                  }
-                });
-              },
-            },
-          ]}
-          onDismiss={() => setFullscreenNoticeDismissed(true)}
-        />
-      )}
 
       {/* Customer-display activation: the browser refused to open the second
           window automatically (it needs one click on this origin first). */}

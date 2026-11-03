@@ -4,8 +4,6 @@ import {
   ShoppingCart,
   Store,
   CheckCircle2,
-  Maximize2,
-  Minimize2,
   Tag,
 } from 'lucide-react';
 import {formatGHS} from '../lib/money';
@@ -32,16 +30,12 @@ interface CustomerDisplayModalProps {
    * window only). Full-screen needs a gesture in that window, so the button
    * is the honest activation path — never a hidden hack.
    */
-  fullscreenControl?: boolean;
   /** Whether the host window is currently full-screen (toggles the icon). */
-  isFullscreen?: boolean;
   /** Toggle handler for the full-screen control. */
-  onToggleFullscreen?: () => void;
   /**
    * Honest notice shown next to the full-screen control when the browser
    * refuses it (it can never be forced). Null/undefined → nothing shown.
    */
-  fullscreenHint?: string | null;
   /**
    * Live link indicator for the second-monitor window: false when no state
    * has arrived from the till for a while (cashier closed / reloaded).
@@ -75,10 +69,6 @@ const PAYMENT_LABELS: Record<CustomerDisplayPayment['method'], string> = {
 export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
   state,
   onClose,
-  fullscreenControl,
-  isFullscreen,
-  onToggleFullscreen,
-  fullscreenHint,
   linkLive,
 }) => {
   const {tenantName, tenantLogo, items, subtotal, discountTotal, taxTotal, totalAmount, payment} = state;
@@ -120,21 +110,6 @@ export const CustomerDisplayModal: React.FC<CustomerDisplayModalProps> = ({
             </span>
           )}
 
-          {fullscreenControl && onToggleFullscreen && (
-            <button
-              onClick={onToggleFullscreen}
-              aria-label={isFullscreen ? 'Exit full screen' : 'Enter full screen'}
-              title={isFullscreen ? 'Exit full screen' : 'Full screen'}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
-            >
-              {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-            </button>
-          )}
-          {fullscreenHint && fullscreenControl && (
-            <span className="hidden sm:inline text-[11px] text-amber-300 max-w-[16rem] text-right">
-              {fullscreenHint}
-            </span>
-          )}
 
           {onClose && (
             <button

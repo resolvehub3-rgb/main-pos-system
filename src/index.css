@@ -42,15 +42,6 @@ body,
   }
 }
 
-/* Same treatment while the Fullscreen API has the app filling a monitor.
-   Esc (or the header button) leaves this state — OS/browser controls are
-   never intercepted. */
-html:fullscreen,
-html:-webkit-full-screen {
-  overscroll-behavior: none;
-  background: #f5f7fa;
-}
-
 /* Collapsible panels (<summary>) in the settings: drop the UA's disclosure
    triangle so the ChevronDown icon is the only affordance. */
 summary::-webkit-details-marker {

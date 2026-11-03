@@ -7,13 +7,6 @@ import {
   subscribeCustomerDisplay,
   DISPLAY_PING_INTERVAL_MS,
 } from '../lib/customerDisplayChannel';
-import {
-  exitAppFullscreen,
-  isFullscreenActive,
-  requestAppFullscreen,
-  subscribeFullscreenChange,
-  type FullscreenResult,
-} from '../lib/fullscreen';
 import type {CustomerDisplayState} from '../types';
 
 /** A display with no state for this long reports "Waiting for the till…". */
@@ -48,10 +41,6 @@ const LINK_TIMEOUT_MS = DISPLAY_PING_INTERVAL_MS * 2 + 1000;
 export const CustomerDisplayWindow: React.FC = () => {
   const [state, setState] = useState<CustomerDisplayState | null>(null);
   const [linkLive, setLinkLive] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-  // Set when the browser refuses full-screen on this window, so the button
-  // never looks broken — it says what happened (honest activation).
-  const [fullscreenHint, setFullscreenHint] = useState<string | null>(null);
   const lastStateAtRef = useRef<number>(0);
   // One session id for this window's whole life (read once from the URL).
   const sessionRef = useRef<string | null>(
@@ -80,14 +69,7 @@ export const CustomerDisplayWindow: React.FC = () => {
       setLinkLive(Date.now() - lastStateAtRef.current < LINK_TIMEOUT_MS);
     }, 2000);
 
-    // One honest attempt at full-screen on the customer monitor: allowed only
-    // if the browser grants it without a gesture here. When it does not, the
-    // header button remains as the one-click path (never an error, never a
-    // hidden workaround).
-    void requestAppFullscreen();
-    const unsubscribeFullscreen = subscribeFullscreenChange(() =>
-      setFullscreen(isFullscreenActive()),
-    );
+    const unsubscribeFullscreen = () => {};
 
     return () => {
       announceDisplayClosed(sessionId);
@@ -98,27 +80,6 @@ export const CustomerDisplayWindow: React.FC = () => {
     };
   }, []);
 
-  const toggleFullscreen = () => {
-    if (isFullscreenActive()) {
-      void exitAppFullscreen();
-      setFullscreenHint(null);
-      return;
-    }
-    void requestAppFullscreen().then((result: FullscreenResult) => {
-      if (result === 'entered' || result === 'already-fullscreen') {
-        setFullscreenHint(null);
-      } else if (result === 'unsupported') {
-        setFullscreenHint('Full screen is not available in this browser.');
-      } else {
-        // 'denied' | 'failed' — the browser said no (or never answered).
-        setFullscreenHint('Full screen was refused — use the browser’s own full-screen control.');
-      }
-      // The hint clears itself so it never becomes clutter on a customer screen.
-      if (result !== 'entered') {
-        window.setTimeout(() => setFullscreenHint(null), 6000);
-      }
-    });
-  };
 
   return (
     <CustomerDisplayModal
@@ -132,10 +93,6 @@ export const CustomerDisplayWindow: React.FC = () => {
         totalAmount: state?.totalAmount ?? 0,
         ...(state?.payment ? {payment: state.payment} : {}),
       }}
-      fullscreenControl
-      isFullscreen={fullscreen}
-      onToggleFullscreen={toggleFullscreen}
-      fullscreenHint={fullscreenHint}
       linkLive={linkLive}
     />
   );

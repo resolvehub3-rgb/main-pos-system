@@ -12,8 +12,6 @@ import {
   CheckCircle2,
   Mail,
   Phone,
-  Maximize2,
-  Minimize2,
 } from 'lucide-react';
 import { UserRole, UserAccount } from '../types';
 import { InstallApp } from './InstallApp';
@@ -31,10 +29,6 @@ interface HeaderProps {
   onOpenCustomerDisplay: () => void;
   /** Live customer-display connection status (dual-screen setup). */
   customerDisplayStatus: CustomerDisplayConnection;
-  /** Enter/exit full-screen (kiosk) mode on the till window. */
-  onToggleFullscreen: () => void;
-  /** Whether the till window is currently full-screen. */
-  fullscreenActive: boolean;
   isConnectedToSupabase: boolean;
   onLogout: () => void;
 }
@@ -78,8 +72,6 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSupabaseModal,
   onOpenCustomerDisplay,
   customerDisplayStatus,
-  onToggleFullscreen,
-  fullscreenActive,
   isConnectedToSupabase,
   onLogout,
 }) => {
@@ -224,24 +216,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="hidden xl:inline">{displayStatusChip.text}</span>
             </button>
           )}
-
-          {/* Full-screen kiosk mode: one click in the installed app or a tab.
-              Esc / the browser's own controls always exit it. */}
-          <button
-            onClick={onToggleFullscreen}
-            title={fullscreenActive ? 'Exit full screen' : 'Enter full screen'}
-            aria-label={fullscreenActive ? 'Exit full screen' : 'Enter full screen'}
-            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-medium transition"
-          >
-            {fullscreenActive ? (
-              <Minimize2 className="w-3.5 h-3.5 text-[#F28C28]" />
-            ) : (
-              <Maximize2 className="w-3.5 h-3.5 text-[#F28C28]" />
-            )}
-            <span className="hidden xl:inline">
-              {fullscreenActive ? 'Exit Full Screen' : 'Full Screen'}
-            </span>
-          </button>
 
           {/* Install SamTill as an app (browser install prompt / help) */}
           <InstallApp />

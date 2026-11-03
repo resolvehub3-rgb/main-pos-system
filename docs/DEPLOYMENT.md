@@ -115,10 +115,11 @@ in-app "Install app" button shows the right instructions per platform).
   gesture ⇒ popup blocked), and if popups are disabled the in-page modal is
   used instead. See `docs/DUAL-SCREEN.md` for the full dual-screen setup,
   Windows 10/11 steps and recovery.
-- **Second monitor / taskbar:** the installed PWA opens in its own window and
-  can be placed on the customer monitor manually; browsers do not offer
-  Electron-style multi-window startup positioning, background services or
-  automatic kiosk locking.
+- **Second monitor / taskbar:** the installed PWA opens in its own window
+  (maximized best-effort, native title bar + taskbar retained) and the
+  customer display opens as a separate window that the operator places on
+  monitor 2; browsers do not offer Electron-style multi-window startup
+  positioning, background services or kiosk locking.
 
 ### Windows 10/11 — installed PWA chrome and limitations
 

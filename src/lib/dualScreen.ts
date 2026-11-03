@@ -251,28 +251,3 @@ export function isWindowAlive(win: Window | null | undefined): boolean {
   }
 }
 
-/**
- * Try to put the customer display window itself into full-screen mode.
- *
- * Full-screen needs a user gesture in *that* window, so this usually reports
- * `denied` when called from the opener — the display window therefore also
- * offers its own one-click full-screen control. Never throws.
- */
-export async function requestFullscreenIn(win: Window | null | undefined): Promise<
-  'entered' | 'denied' | 'unsupported' | 'failed' | 'gone'
-> {
-  if (!isWindowAlive(win)) return 'gone';
-  try {
-    const doc = win!.document;
-    const el = doc.documentElement as HTMLElement & {requestFullscreen?: () => Promise<void>};
-    if (typeof doc.fullscreenEnabled === 'boolean' && !doc.fullscreenEnabled) return 'unsupported';
-    if (!el.requestFullscreen) return 'unsupported';
-    if (doc.fullscreenElement) return 'entered';
-    await el.requestFullscreen();
-    return doc.fullscreenElement ? 'entered' : 'failed';
-  } catch (err) {
-    const name = err instanceof Error ? err.name : '';
-    if (name === 'NotAllowedError' || name === 'SecurityError') return 'denied';
-    return 'failed';
-  }
-}

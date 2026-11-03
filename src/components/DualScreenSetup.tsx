@@ -1,8 +1,6 @@
 import React, {useEffect, useState} from 'react';
 import {
   Monitor,
-  Maximize2,
-  Minimize2,
   Search,
   Info,
   CheckCircle2,
@@ -22,14 +20,6 @@ import {
   customerDisplayConnectionLabel,
   useCustomerDisplayConnection,
 } from '../lib/customerDisplayStatus';
-import {
-  exitAppFullscreen,
-  isFullscreenActive,
-  isFullscreenSupported,
-  requestAppFullscreen,
-  useFullscreenActive,
-} from '../lib/fullscreen';
-
 interface DualScreenSetupProps {
   /** Open / reopen / focus the customer display window (user gesture). */
   onOpenCustomerDisplay: () => void;
@@ -89,14 +79,13 @@ const StatusRow: React.FC<{label: string; value: string; tone: 'ok' | 'warn' | '
  *
  * Everything here is best-effort and honest: monitor detection only reports
  * what the browser actually tells us, the window can only be placed where the
- * browser allows, and full-screen needs a click. The till never depends on
+ * browser allows. SamTill opens as a maximized window (native title bar retained). The till never depends on
  * any of it — if the second monitor is missing, blocked or unplugged, the
  * cashier keeps selling on screen 1 and this panel says exactly why.
  */
 export const DualScreenSetup: React.FC<DualScreenSetupProps> = ({onOpenCustomerDisplay}) => {
   const settings = useDualScreenSettings();
   const connection = useCustomerDisplayConnection();
-  const fullscreenActive = useFullscreenActive();
 
   const [monitorReport, setMonitorReport] = useState<MonitorReport>(() => detectMultiMonitorSync());
   const [detectMessage, setDetectMessage] = useState<{ok: boolean; text: string} | null>(null);
@@ -151,8 +140,6 @@ export const DualScreenSetup: React.FC<DualScreenSetupProps> = ({onOpenCustomerD
     return 'Not reported by this browser';
   })();
 
-  const fullscreenSupported = isFullscreenSupported();
-
   return (
     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:col-span-2">
       <div className="flex items-center gap-2 mb-1">
@@ -180,12 +167,6 @@ export const DualScreenSetup: React.FC<DualScreenSetupProps> = ({onOpenCustomerD
             checked={settings.auto_open}
             onChange={(next) => updateDualScreenSettings({auto_open: next})}
           />
-          <ToggleRow
-            label="Start in full screen (kiosk mode)"
-            hint="In the installed app, SamTill asks to fill the whole monitor. Esc always exits; the browser decides whether it can be automatic."
-            checked={settings.auto_fullscreen}
-            onChange={(next) => updateDualScreenSettings({auto_fullscreen: next})}
-          />
 
           <div className="pt-4 border-t border-slate-200 flex flex-wrap gap-2">
             <button
@@ -204,27 +185,6 @@ export const DualScreenSetup: React.FC<DualScreenSetupProps> = ({onOpenCustomerD
             >
               <Search className="w-4 h-4" />
               {detecting ? 'Checking displays…' : 'Detect monitors'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (isFullscreenActive()) {
-                  void exitAppFullscreen();
-                } else {
-                  void requestAppFullscreen().then((result) => {
-                    if (result === 'unsupported') {
-                      setDetectMessage({
-                        ok: false,
-                        text: 'Full screen is not available in this browser — the app keeps running normally.',
-                      });
-                    }
-                  });
-                }
-              }}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold transition"
-            >
-              {fullscreenActive ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-              {fullscreenActive ? 'Exit full screen' : 'Enter full screen'}
             </button>
           </div>
 
@@ -280,17 +240,6 @@ export const DualScreenSetup: React.FC<DualScreenSetupProps> = ({onOpenCustomerD
                     ? 'warn'
                     : 'idle'
               }
-            />
-            <StatusRow
-              label="Full screen"
-              value={
-                fullscreenActive
-                  ? 'Full-screen active'
-                  : fullscreenSupported
-                    ? 'Windowed (click “Enter full screen”)'
-                    : 'Not supported by this browser'
-              }
-              tone={fullscreenActive ? 'ok' : fullscreenSupported ? 'idle' : 'warn'}
             />
             <StatusRow
               label="Auto-open at start-up"
