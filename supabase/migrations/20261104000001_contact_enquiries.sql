@@ -2,11 +2,7 @@
 -- SamTill POS — contact enquiries from the public landing site
 -- =============================================================================
 --
--- Stores messages submitted through the landing site's contact form so the
--- super-admin can review and respond to them in real time. Writes come from
--- the landing site (anon role, RLS allows insert only); reads/updates are
--- restricted to super-admins. The table is added to the realtime publication
--- so the super-admin dashboard updates live.
+-- IDEMPOTENT: safe to re-run.
 -- =============================================================================
 
 create table if not exists public.contact_enquiries (
@@ -23,35 +19,32 @@ create table if not exists public.contact_enquiries (
 
 alter table public.contact_enquiries enable row level security;
 
--- Anyone (anon) may submit an enquiry. No other write access.
+drop policy if exists "contact_enquiries_anon_insert" on public.contact_enquiries;
+drop policy if exists "contact_enquiries_super_admin_select" on public.contact_enquiries;
+drop policy if exists "contact_enquiries_super_admin_update" on public.contact_enquiries;
+
 create policy "contact_enquiries_anon_insert"
   on public.contact_enquiries
   for insert
   to anon, authenticated
   with check (true);
 
--- Only super-admins may read enquiries.
 create policy "contact_enquiries_super_admin_select"
   on public.contact_enquiries
   for select
   to authenticated
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'super_admin')
-  );
+  using (public.is_super_admin());
 
--- Only super-admins may mark enquiries as read.
 create policy "contact_enquiries_super_admin_update"
   on public.contact_enquiries
   for update
   to authenticated
-  using (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'super_admin')
-  )
-  with check (
-    exists (select 1 from public.users u where u.id = auth.uid() and u.role = 'super_admin')
-  );
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
 
--- Realtime: publish inserts/updates so the super-admin dashboard updates live.
+grant insert on public.contact_enquiries to anon, authenticated;
+grant select, update on public.contact_enquiries to authenticated;
+
 do $$
 begin
   if not exists (
