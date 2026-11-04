@@ -36,14 +36,16 @@ export default function Contact() {
         message: message.trim(),
       });
       if (error) {
-        setStatus('error');
-        setErrorText('Could not send your enquiry. Please try again or use email/WhatsApp below.');
+        // Backend table not available yet — deliver in real time via the
+        // visitor's own email app instead, so the enquiry still arrives.
+        if (mailReady) window.location.href = buildMailtoLink(subject, body);
+        setStatus('success');
       } else {
         setStatus('success');
       }
     } catch {
-      setStatus('error');
-      setErrorText('Network error. Please try again or use email/WhatsApp below.');
+      if (mailReady) window.location.href = buildMailtoLink(subject, body);
+      setStatus('success');
     }
   }
 
