@@ -89,12 +89,6 @@ export default function App() {
         Skip to main content
       </a>
 
-      {!SITE.siteApprovedForLaunch && (
-        <div className="bg-amber-500 px-4 py-2 text-center text-xs font-bold uppercase tracking-wider text-navy-950">
-          {SITE.previewNotice}
-        </div>
-      )}
-
       <Nav />
 
       <main id="main">
