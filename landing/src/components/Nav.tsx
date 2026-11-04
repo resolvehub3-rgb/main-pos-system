@@ -78,10 +78,10 @@ export default function Nav() {
             </a>
           )}
           <a
-            href="#contact"
+            href="/login"
             className="inline-flex items-center rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
           >
-            Enquire now
+            Login
           </a>
         </div>
 
@@ -127,11 +127,11 @@ export default function Nav() {
           ))}
           <li className="mt-2">
             <a
-              href="#contact"
+              href="/login"
               onClick={() => setOpen(false)}
               className="block rounded-full bg-amber-700 px-5 py-3 text-center text-base font-bold text-white transition-colors hover:bg-amber-800"
             >
-              Enquire now
+              Login
             </a>
           </li>
           {registerCta && (
