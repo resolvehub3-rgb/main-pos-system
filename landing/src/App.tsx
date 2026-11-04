@@ -5,7 +5,6 @@ import Faq from './components/Faq';
 import Features from './components/Features';
 import Footer from './components/Footer';
 import Hero from './components/Hero';
-import HowItWorks from './components/HowItWorks';
 import Nav from './components/Nav';
 import Screenshots from './components/Screenshots';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -97,7 +96,6 @@ export default function App() {
             <Hero />
             <Features />
             <Screenshots />
-            <HowItWorks />
             <Faq />
             <CommercePreview />
             <Contact />
