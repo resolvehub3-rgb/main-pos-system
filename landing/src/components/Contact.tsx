@@ -12,12 +12,43 @@ import {Reveal} from './Reveal';
 export default function Contact() {
   const [message, setMessage] = useState(DEFAULT_ENQUIRY);
   const [selectedPackage, setSelectedPackage] = useState<string>('Not sure yet');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [errorText, setErrorText] = useState('');
 
   const subject = `SamTill enquiry — ${selectedPackage}`;
   const body = `${message}\n\nPreferred package: ${selectedPackage}`;
 
   const mailReady = CONTACT.ownerConfirmed && CONTACT.email.trim().length > 0;
   const whatsappReady = CONTACT.ownerConfirmed && CONTACT.whatsapp.trim().length > 0;
+
+  async function sendEnquiry() {
+    setStatus('sending');
+    setErrorText('');
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({
+          name: name.trim() || undefined,
+          email: email.trim() || undefined,
+          package: selectedPackage === 'Not sure yet' ? undefined : selectedPackage,
+          message,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {ok?: boolean; message?: string; error?: string};
+      if (res.ok && data.ok) {
+        setStatus('success');
+      } else {
+        setStatus('error');
+        setErrorText(data.message || data.error || 'Could not send your enquiry. Please try again or use email/WhatsApp below.');
+      }
+    } catch {
+      setStatus('error');
+      setErrorText('Network error. Please try again or use email/WhatsApp below.');
+    }
+  }
 
   return (
     <section id="contact" className="bg-white py-20 lg:py-28">
@@ -90,9 +121,27 @@ export default function Contact() {
             >
               <h3 className="text-lg font-bold text-navy-900">Your enquiry</h3>
 
-              <label htmlFor="package-select" className="mt-5 block text-sm font-semibold text-navy-900">
-                Package you are interested in
+              <label htmlFor="enquiry-name" className="mt-5 block text-sm font-semibold text-navy-900">
+                Your name (optional)
               </label>
+              <input
+                id="enquiry-name"
+                type="text"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-navy-900 shadow-sm"
+              />
+
+              <label htmlFor="enquiry-email" className="mt-5 block text-sm font-semibold text-navy-900">
+                Your email (optional)
+              </label>
+              <input
+                id="enquiry-email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-navy-900 shadow-sm"
+              />
               <select
                 id="package-select"
                 value={selectedPackage}
@@ -122,6 +171,25 @@ export default function Contact() {
               <p id="enquiry-note" className="mt-2 text-xs text-slate-500">
                 Edit anything here before sending. No information is sent from this page itself.
               </p>
+
+              <div className="mt-6">
+                <button
+                  type="button"
+                  disabled={status === 'sending' || message.trim() === ''}
+                  onClick={sendEnquiry}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-amber-700 px-6 py-3.5 text-sm font-bold text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                >
+                  {status === 'sending' ? 'Sending…' : 'Send enquiry'}
+                </button>
+                {status === 'success' && (
+                  <p className="mt-3 text-sm font-semibold text-emerald-700">
+                    Your enquiry was received. SamTeck Digital will be in touch.
+                  </p>
+                )}
+                {status === 'error' && (
+                  <p className="mt-3 text-sm font-semibold text-red-700">{errorText}</p>
+                )}
+              </div>
 
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
                 <button
