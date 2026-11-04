@@ -1589,11 +1589,13 @@ class DatabaseService {
         const { error } = await this.supabaseClient
           .rpc('delete_tenant', { p_tenant_id: toUuid(tenantId) });
         if (error) {
-          console.error('deleteTenant failed:', error.message);
+          console.error('deleteTenant failed:', error.code, error.message, error.details, error.hint);
+          (window as any).__lastDeleteError = error.message || JSON.stringify(error);
           return false;
         }
       } catch (err) {
         console.error('deleteTenant failed:', err);
+        (window as any).__lastDeleteError = String(err);
         return false;
       }
     }
