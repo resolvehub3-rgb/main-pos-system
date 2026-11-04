@@ -962,16 +962,28 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => db.toggleTenantStatus(t.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                        t.is_active
-                          ? 'border border-rose-200 text-rose-600 hover:bg-rose-50'
-                          : 'border border-emerald-200 text-emerald-600 hover:bg-emerald-50'
-                      }`}
-                    >
-                      {t.is_active ? 'Suspend' : 'Activate'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => db.toggleTenantStatus(t.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                          t.is_active
+                            ? 'border border-rose-200 text-rose-600 hover:bg-rose-50'
+                            : 'border border-emerald-200 text-emerald-600 hover:bg-emerald-50'
+                        }`}
+                      >
+                        {t.is_active ? 'Suspend' : 'Activate'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm('Delete ' + t.name + ' and all of its data? This cannot be undone.')) {
+                            db.deleteTenant(t.id);
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-300 text-rose-700 hover:bg-rose-50 transition"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

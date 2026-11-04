@@ -387,6 +387,9 @@ function recordingClient(existingTenants: string[] = []): {
         },
       };
     },
+    rpc() {
+      return Promise.resolve({ error: null });
+    },
   };
 
   return { client, calls };

@@ -31,6 +31,7 @@ import {
 import {
   syncTenant,
   syncTenantStatus,
+  syncDeleteTenant,
   syncBranch,
   syncUser,
   syncUserStatus,
@@ -1576,6 +1577,17 @@ class DatabaseService {
     t.is_active = !t.is_active;
     if (this.supabaseClient) {
       syncTenantStatus(this.supabaseClient, tenantId, { is_active: t.is_active });
+    }
+    this.notify();
+    return true;
+  }
+
+  public deleteTenant(tenantId: string): boolean {
+    const t = this.tenants.find((item) => item.id === tenantId);
+    if (!t) return false;
+    this.tenants = this.tenants.filter((item) => item.id !== tenantId);
+    if (this.supabaseClient) {
+      syncDeleteTenant(this.supabaseClient, tenantId);
     }
     this.notify();
     return true;

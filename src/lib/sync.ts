@@ -493,6 +493,7 @@ export interface SyncClient {
     };
     delete(): { eq(column: string, value: string): PromiseLike<SyncResult> };
   };
+  rpc(fn: string, params?: Record<string, unknown>): PromiseLike<SyncResult>;
 }
 
 /**
@@ -633,6 +634,10 @@ export function syncUserStatus(
  * The app never needs this — writes are fire-and-forget by design. The sync
  * test uses it to assert on the exact rows that were sent without polling.
  */
+export function syncDeleteTenant(c: SyncClient, tenantId: string): void {
+  push('tenants', () => c.rpc('delete_tenant', { p_tenant_id: toUuid(tenantId) }));
+}
+
 export function flushSync(): Promise<void> {
   return queue;
 }
