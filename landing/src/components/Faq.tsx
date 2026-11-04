@@ -8,7 +8,7 @@ function buildFaqs(): Array<{q: string; a: string}> {
   },
   {
     q: 'How much does SamTill cost?',
-    a: 'There are three proposed packages — Starter, Business and Professional — shown in the pricing section above. These prices are still a draft awaiting final approval by SamTeck Digital, so please enquire to confirm the current price before making any decision.',
+    a: 'SamTill is offered in three proposed packages — Starter, Business and Professional — with one-time licences for one computer. These prices are still a draft awaiting final approval by SamTeck Digital, so please enquire to confirm the current price before making any decision.',
   },
   {
     q: 'Is the licence a subscription?',
@@ -52,10 +52,10 @@ export default function Faq() {
           </h2>
         </Reveal>
 
-        <div className="mt-10 space-y-3">
+        <div className="mt-10 grid grid-cols-1 gap-3 md:grid-cols-2">
           {faqs.map((item, index) => (
             <Reveal key={item.q} delayMs={index * 50}>
-              <details className="group rounded-xl border border-navy-700 bg-navy-900/60 transition-colors open:border-amber-500/50">
+              <details className="group h-full rounded-xl border border-navy-700 bg-navy-900/60 transition-colors open:border-amber-500/50">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-base font-semibold text-white [&::-webkit-details-marker]:hidden">
                   {item.q}
                   <svg
