@@ -2,23 +2,20 @@ import {useState} from 'react';
 import {
   CONTACT,
   CONTACT_PENDING,
-  DEFAULT_ENQUIRY,
   buildMailtoLink,
   buildWhatsAppLink,
 } from '../config/contact';
-import {PACKAGES} from '../config/pricing';
 import {Reveal} from './Reveal';
 
 export default function Contact() {
-  const [message, setMessage] = useState(DEFAULT_ENQUIRY);
-  const [selectedPackage, setSelectedPackage] = useState<string>('Not sure yet');
+  const [message, setMessage] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
   const [errorText, setErrorText] = useState('');
 
-  const subject = `SamTill enquiry — ${selectedPackage}`;
-  const body = `${message}\n\nPreferred package: ${selectedPackage}`;
+  const subject = 'SamTill enquiry';
+  const body = message;
 
   const mailReady = CONTACT.ownerConfirmed && CONTACT.email.trim().length > 0;
   const whatsappReady = CONTACT.ownerConfirmed && CONTACT.whatsapp.trim().length > 0;
@@ -33,7 +30,6 @@ export default function Contact() {
         body: JSON.stringify({
           name: name.trim() || undefined,
           email: email.trim() || undefined,
-          package: selectedPackage === 'Not sure yet' ? undefined : selectedPackage,
           message,
         }),
       });
@@ -122,52 +118,42 @@ export default function Contact() {
               <h3 className="text-lg font-bold text-navy-900">Your enquiry</h3>
 
               <label htmlFor="enquiry-name" className="mt-5 block text-sm font-semibold text-navy-900">
-                Your name (optional)
+                Your name (required)
               </label>
               <input
                 id="enquiry-name"
                 type="text"
+                required
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-navy-900 shadow-sm"
               />
 
               <label htmlFor="enquiry-email" className="mt-5 block text-sm font-semibold text-navy-900">
-                Your email (optional)
+                Your email (required)
               </label>
               <input
                 id="enquiry-email"
                 type="email"
+                required
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-navy-900 shadow-sm"
               />
-              <select
-                id="package-select"
-                value={selectedPackage}
-                onChange={(event) => setSelectedPackage(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-navy-900 shadow-sm"
-              >
-                <option>Not sure yet</option>
-                {PACKAGES.map((pkg) => (
-                  <option key={pkg.id} value={pkg.name}>
-                    {pkg.name} — {pkg.currency}
-                    {pkg.price.toLocaleString('en-GH')}
-                  </option>
-                ))}
-              </select>
-
-              <label htmlFor="enquiry-message" className="mt-5 block text-sm font-semibold text-navy-900">
-                Message
-              </label>
-              <textarea
-                id="enquiry-message"
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-                rows={9}
-                className="mt-2 w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm leading-relaxed text-navy-900 shadow-sm"
-                aria-describedby="enquiry-note"
-              />
+              <details className="mt-5 rounded-xl border border-slate-300 bg-white shadow-sm">
+                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-navy-900">
+                  Message (click to open)
+                </summary>
+                <textarea
+                  id="enquiry-message"
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  rows={9}
+                  placeholder="Write your message here..."
+                  className="w-full resize-y rounded-b-xl border-t border-slate-300 bg-white px-4 py-3 text-sm leading-relaxed text-navy-900"
+                  aria-describedby="enquiry-note"
+                />
+              </details>
               <p id="enquiry-note" className="mt-2 text-xs text-slate-500">
                 Edit anything here before sending. No information is sent from this page itself.
               </p>
@@ -238,12 +224,6 @@ export default function Contact() {
                 </button>
               </div>
 
-              {(mailReady || whatsappReady) && (
-                <p className="mt-4 text-xs text-slate-500">
-                  These buttons open your own email or WhatsApp — this site has no backend and
-                  stores nothing.
-                </p>
-              )}
             </form>
           </Reveal>
         </div>
