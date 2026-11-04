@@ -1,5 +1,4 @@
 import {useEffect} from 'react';
-import CommercePreview from './components/CommercePreview';
 import Contact from './components/Contact';
 import Faq from './components/Faq';
 import Features from './components/Features';
@@ -97,7 +96,6 @@ export default function App() {
             <Features />
             <Screenshots />
             <Faq />
-            <CommercePreview />
             <Contact />
           </>
         )}
