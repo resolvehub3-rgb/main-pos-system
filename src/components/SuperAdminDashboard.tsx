@@ -974,9 +974,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                         {t.is_active ? 'Suspend' : 'Activate'}
                       </button>
                       <button
-                        onClick={() => {
-                          if (window.confirm('Delete ' + t.name + ' and all of its data? This cannot be undone.')) {
-                            db.deleteTenant(t.id);
+                        onClick={async () => {
+                          if (!window.confirm('Delete ' + t.name + ' and all of its data? This cannot be undone.')) return;
+                          const ok = await db.deleteTenant(t.id);
+                          if (!ok) {
+                            window.alert('Could not delete ' + t.name + '. Make sure the delete_tenant migration (20261104000002) is applied and you are signed in as a super admin.');
                           }
                         }}
                         className="px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-300 text-rose-700 hover:bg-rose-50 transition"

@@ -31,7 +31,6 @@ import {
 import {
   syncTenant,
   syncTenantStatus,
-  syncDeleteTenant,
   syncBranch,
   syncUser,
   syncUserStatus,
@@ -1582,13 +1581,23 @@ class DatabaseService {
     return true;
   }
 
-  public deleteTenant(tenantId: string): boolean {
+  public async deleteTenant(tenantId: string): Promise<boolean> {
     const t = this.tenants.find((item) => item.id === tenantId);
     if (!t) return false;
-    this.tenants = this.tenants.filter((item) => item.id !== tenantId);
     if (this.supabaseClient) {
-      syncDeleteTenant(this.supabaseClient, tenantId);
+      try {
+        const { error } = await this.supabaseClient
+          .rpc('delete_tenant', { p_tenant_id: toUuid(tenantId) });
+        if (error) {
+          console.error('deleteTenant failed:', error.message);
+          return false;
+        }
+      } catch (err) {
+        console.error('deleteTenant failed:', err);
+        return false;
+      }
     }
+    this.tenants = this.tenants.filter((item) => item.id !== tenantId);
     this.notify();
     return true;
   }
