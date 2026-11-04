@@ -19,7 +19,7 @@ export const CONTACT = {
   email: 'samteckdigital@gmail.com',
 
   /** WhatsApp number in international format without '+', e.g. '233241234567' */
-  whatsapp: '0594345424',
+  whatsapp: '233594345424',
 
   /** Public phone number displayed as text, e.g. '+233 24 123 4567' */
   phoneDisplay: '0594345424',
