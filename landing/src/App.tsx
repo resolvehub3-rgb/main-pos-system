@@ -1,5 +1,4 @@
 import {useEffect} from 'react';
-import Comparison from './components/Comparison';
 import CommercePreview from './components/CommercePreview';
 import Contact from './components/Contact';
 import Faq from './components/Faq';
@@ -8,7 +7,6 @@ import Footer from './components/Footer';
 import Hero from './components/Hero';
 import HowItWorks from './components/HowItWorks';
 import Nav from './components/Nav';
-import Pricing from './components/Pricing';
 import Screenshots from './components/Screenshots';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import LoginPage from './pages/LoginPage';
@@ -99,8 +97,6 @@ export default function App() {
             <Hero />
             <Features />
             <Screenshots />
-            <Pricing />
-            <Comparison />
             <HowItWorks />
             <Faq />
             <CommercePreview />
