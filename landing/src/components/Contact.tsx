@@ -6,6 +6,12 @@ import {
   buildWhatsAppLink,
 } from '../config/contact';
 import {Reveal} from './Reveal';
+import {createClient} from '@supabase/supabase-js';
+
+const posSupabase = createClient(
+  'https://ohqatznpnvoqrsjpxwgt.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ocWF0em5wbnZvcXJzanB4d2d0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMyNjQ0ODIsImV4cCI6MjEwODg0MDQ4Mn0.j0whwl9fNioaT27unLyNoBBi9cw9iZDkp3lr7DnYoDA',
+);
 
 export default function Contact() {
   const [message, setMessage] = useState('');
@@ -24,21 +30,16 @@ export default function Contact() {
     setStatus('sending');
     setErrorText('');
     try {
-      const res = await fetch('/api/contact', {
-        method: 'POST',
-        headers: {'content-type': 'application/json'},
-        body: JSON.stringify({
-          name: name.trim() || undefined,
-          email: email.trim() || undefined,
-          message,
-        }),
+      const {error} = await posSupabase.from('contact_enquiries').insert({
+        name: name.trim() || null,
+        email: email.trim() || null,
+        message: message.trim(),
       });
-      const data = (await res.json().catch(() => ({}))) as {ok?: boolean; message?: string; error?: string};
-      if (res.ok && data.ok) {
-        setStatus('success');
-      } else {
+      if (error) {
         setStatus('error');
-        setErrorText(data.message || data.error || 'Could not send your enquiry. Please try again or use email/WhatsApp below.');
+        setErrorText('Could not send your enquiry. Please try again or use email/WhatsApp below.');
+      } else {
+        setStatus('success');
       }
     } catch {
       setStatus('error');
@@ -161,7 +162,7 @@ export default function Contact() {
               <div className="mt-6">
                 <button
                   type="button"
-                  disabled={status === 'sending' || message.trim() === ''}
+                  disabled={status === 'sending' || name.trim() === '' || email.trim() === '' || message.trim() === ''}
                   onClick={sendEnquiry}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-amber-700 px-6 py-3.5 text-sm font-bold text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
                 >

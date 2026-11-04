@@ -328,6 +328,11 @@ class DatabaseService {
     return { ...this.config };
   }
 
+  /** Expose the underlying Supabase client (read-only realtime subscriptions). */
+  public getSupabaseClient(): any {
+    return this.supabaseClient;
+  }
+
   public async updateSupabaseConfig(url: string, anonKey: string): Promise<boolean> {
     this.config.url = url.trim();
     this.config.anonKey = anonKey.trim();

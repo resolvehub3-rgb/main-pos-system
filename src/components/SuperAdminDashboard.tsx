@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   Store,
@@ -29,6 +29,7 @@ import {
   Server,
   Zap,
   ChevronDown,
+  MessageSquare,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -103,6 +104,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     | 'reports'
     | 'settings'
     | 'support'
+    | 'messages'
   >('overview');
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -130,6 +132,41 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [newUserRole, setNewUserRole] = useState<'super_admin' | 'shop_owner' | 'cashier'>('shop_owner');
   const [newUserShopId, setNewUserShopId] = useState('tenant-accra-mall');
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+
+  // Contact enquiries from the public landing site (real-time).
+  const [contactMessages, setContactMessages] = useState<any[]>([]);
+  useEffect(() => {
+    const client = db.getSupabaseClient();
+    if (!client) return;
+    let channel: any = null;
+    try {
+      channel = client
+        .channel('contact-enquiries')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_enquiries' }, (payload: any) => {
+          if (payload.eventType === 'INSERT' && payload.new) {
+            setContactMessages((prev) => [payload.new, ...prev]);
+          } else if (payload.eventType === 'UPDATE' && payload.new) {
+            setContactMessages((prev) => prev.map((m) => (m.id === payload.new.id ? payload.new : m)));
+          }
+        })
+        .subscribe();
+      client
+        .from('contact_enquiries')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50)
+        .then(({ data }: any) => {
+          if (data) setContactMessages(data);
+        });
+    } catch {
+      // Table may not exist yet (migration not applied) - fail silently.
+    }
+    return () => {
+      if (channel) {
+        try { client.removeChannel(channel); } catch { /* ignore */ }
+      }
+    };
+  }, []);
 
   // Dynamic calculations from database
   const users = db.getUsers();
@@ -304,6 +341,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           { id: 'reports', label: 'Reports', icon: BarChart3 },
           { id: 'settings', label: 'Settings', icon: Settings },
           { id: 'support', label: 'Health', icon: HelpCircle },
+          { id: 'messages', label: 'Messages', icon: MessageSquare },
         ].map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -346,6 +384,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             { id: 'reports', label: 'Reports', icon: BarChart3 },
             { id: 'settings', label: 'System Settings', icon: Settings },
             { id: 'support', label: 'Support & Health', icon: HelpCircle },
+            { id: 'messages', label: 'Messages', icon: MessageSquare },
           ].map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -1377,6 +1416,50 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               <p className="text-slate-400">[SECURITY] Supabase RLS verified on tenants, sales, and products</p>
               <p className="text-slate-400">[TILLS] 12 supermarket active branches reporting heartbeat</p>
             </div>
+          </div>
+        )}
+
+        {/* MESSAGES (contact enquiries from the landing site) */}
+        {activeTab === 'messages' && (
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 max-w-5xl">
+            <div>
+              <h3 className="text-lg font-black text-slate-900">Contact enquiries</h3>
+              <p className="text-xs text-slate-500">New messages from the landing site appear here in real time.</p>
+            </div>
+            {contactMessages.length === 0 ? (
+              <p className="text-sm text-slate-500 py-8 text-center">No enquiries yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {contactMessages.map((m: any) => (
+                  <div key={m.id} className="rounded-xl border border-slate-200 p-4 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-bold text-slate-900 text-sm">{m.name || 'Anonymous'}</p>
+                      <span className="text-[11px] text-slate-400">
+                        {m.created_at ? new Date(m.created_at).toLocaleString() : ''}
+                      </span>
+                    </div>
+                    {m.email && <p className="text-xs text-slate-600">{m.email}</p>}
+                    {m.phone && <p className="text-xs text-slate-600">{m.phone}</p>}
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{m.message}</p>
+                    {m.read_at ? (
+                      <span className="text-[11px] text-emerald-600 font-bold">Read</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const client = db.getSupabaseClient();
+                          if (!client) return;
+                          await client.from('contact_enquiries').update({ read_at: new Date().toISOString() }).eq('id', m.id);
+                        }}
+                        className="text-[11px] font-bold text-amber-600 hover:underline"
+                      >
+                        Mark as read
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
