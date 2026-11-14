@@ -251,6 +251,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialTab = 'login', onLogi
                           <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
                             Password
                           </label>
+                          <a
+                            href="/#/forgot-password"
+                            className="text-xs font-semibold text-[#F28C28] hover:underline"
+                          >
+                            Forgot password?
+                          </a>
                         </div>
                         <div className="relative">
                           <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />

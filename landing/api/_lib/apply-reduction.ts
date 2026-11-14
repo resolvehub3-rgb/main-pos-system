@@ -37,7 +37,7 @@ import {
   type ReduceContext,
   type Reduction,
 } from './event-reducer.ts';
-import {BackendError, insertRow, selectRows, updateRows} from './supabase.ts';
+import {BackendError, commerceTable, insertRow, selectRows, updateRows} from './supabase.ts';
 
 export type ClaimOutcome = 'new' | 'retry' | 'duplicate';
 
@@ -47,11 +47,6 @@ interface EventRecordRow {
   received_at: string;
 }
 
-/**
- * A `received` row younger than this is assumed to be processed by a
- * concurrent delivery (answer duplicate); older than this, the previous
- * attempt most likely crashed mid-processing and is retried.
- */
 const IN_FLIGHT_GRACE_MS = 5 * 60 * 1000;
 
 export interface ApplyInput {
@@ -74,9 +69,10 @@ function escapeEq(value: string): string {
 }
 
 async function claimEvent(config: CommerceConfig, input: ApplyInput): Promise<ClaimOutcome> {
+  const table = commerceTable(config, 'webhook_events');
   const existing = await selectRows<EventRecordRow>(
     config,
-    'webhook_events',
+    table,
     `dedupe_key=eq.${escapeEq(input.dedupeKey)}&select=id,status,received_at&limit=1`,
   );
 
@@ -89,23 +85,21 @@ async function claimEvent(config: CommerceConfig, input: ApplyInput): Promise<Cl
         (Number.isNaN(receivedMs) || Date.now() - receivedMs > IN_FLIGHT_GRACE_MS));
 
     if (stalled) {
-      // Previous attempt failed or crashed mid-processing — allow a retry.
       await updateRows(
         config,
-        'webhook_events',
+        table,
         `dedupe_key=eq.${escapeEq(input.dedupeKey)}`,
         {status: 'received', failure_reason: null, received_at: new Date().toISOString()},
       );
       return 'retry';
     }
-    // Fresh `received` (concurrent delivery in flight) or `processed`.
     return 'duplicate';
   }
 
   try {
     await insertRow(
       config,
-      'webhook_events',
+      table,
       {
         dedupe_key: input.dedupeKey,
         event_type: input.event.type,
@@ -116,7 +110,6 @@ async function claimEvent(config: CommerceConfig, input: ApplyInput): Promise<Cl
     );
     return 'new';
   } catch (cause) {
-    // Unique violation on dedupe_key: a concurrent delivery won the race.
     if (cause instanceof BackendError && cause.status === 409) {
       return 'duplicate';
     }
@@ -125,20 +118,30 @@ async function claimEvent(config: CommerceConfig, input: ApplyInput): Promise<Cl
 }
 
 async function markEventProcessed(config: CommerceConfig, dedupeKey: string): Promise<void> {
-  await updateRows(config, 'webhook_events', `dedupe_key=eq.${escapeEq(dedupeKey)}`, {
-    status: 'processed',
-    processed_at: new Date().toISOString(),
-    failure_reason: null,
-  });
+  await updateRows(
+    config,
+    commerceTable(config, 'webhook_events'),
+    `dedupe_key=eq.${escapeEq(dedupeKey)}`,
+    {
+      status: 'processed',
+      processed_at: new Date().toISOString(),
+      failure_reason: null,
+    },
+  );
 }
 
 /** Best-effort: used from catch blocks, must not throw. */
 export async function markEventFailed(config: CommerceConfig, dedupeKey: string, reason: string): Promise<void> {
   try {
-    await updateRows(config, 'webhook_events', `dedupe_key=eq.${escapeEq(dedupeKey)}`, {
-      status: 'failed',
-      failure_reason: reason.slice(0, 500),
-    });
+    await updateRows(
+      config,
+      commerceTable(config, 'webhook_events'),
+      `dedupe_key=eq.${escapeEq(dedupeKey)}`,
+      {
+        status: 'failed',
+        failure_reason: reason.slice(0, 500),
+      },
+    );
   } catch (cause) {
     console.error(`commerce: could not mark event failed (${dedupeKey}): ${String(cause)}`);
   }
@@ -147,6 +150,31 @@ export async function markEventFailed(config: CommerceConfig, dedupeKey: string,
 interface ApplyOutcome {
   /** False when another writer already applied this payment (lost race). */
   applied: boolean;
+}
+
+async function syncPosTenantSubscription(
+  config: CommerceConfig,
+  userId: string,
+  validTo: string,
+): Promise<void> {
+  try {
+    const memberships = await selectRows<{tenant_id: string}>(
+      config,
+      'tenant_memberships',
+      `user_id=eq.${escapeEq(userId)}&role=eq.shop_owner&is_active=eq.true&select=tenant_id`,
+    );
+    for (const row of memberships) {
+      if (!row.tenant_id) continue;
+      await updateRows(config, 'tenants', `id=eq.${escapeEq(row.tenant_id)}`, {
+        subscription_status: 'active',
+        subscription_expires_at: validTo,
+        is_active: true,
+      });
+    }
+  } catch (cause) {
+    // Non-fatal: standalone commerce deployments may not have POS tenant_memberships.
+    console.warn(`commerce: tenant subscription sync skipped: ${String(cause)}`);
+  }
 }
 
 async function applyPatches(
@@ -158,7 +186,7 @@ async function applyPatches(
   if (reduction.orderAction === 'update' && reduction.orderPatch !== null && context.order !== null) {
     const updated = await updateRows(
       config,
-      'orders',
+      commerceTable(config, 'orders'),
       `reference=eq.${escapeEq(context.order.reference)}&status=eq.pending`,
       reduction.orderPatch,
     );
@@ -167,18 +195,41 @@ async function applyPatches(
     }
   }
 
+  let activatedValidTo: string | null = null;
+  let activatedUserId: string | null = context.order?.user_id ?? null;
+
+  const entitlementsTable = commerceTable(config, 'entitlements');
   if (reduction.entitlementAction === 'create' && reduction.entitlementPatch !== null) {
-    await insertRow(config, 'entitlements', reduction.entitlementPatch);
+    await insertRow(config, entitlementsTable, reduction.entitlementPatch);
+    activatedValidTo =
+      typeof reduction.entitlementPatch.valid_to === 'string'
+        ? reduction.entitlementPatch.valid_to
+        : null;
   } else if (
     reduction.entitlementAction === 'update' &&
     reduction.entitlementPatch !== null &&
     context.entitlement !== null
   ) {
-    await updateRows(config, 'entitlements', `id=eq.${escapeEq(context.entitlement.id)}`, reduction.entitlementPatch);
+    await updateRows(
+      config,
+      entitlementsTable,
+      `id=eq.${escapeEq(context.entitlement.id)}`,
+      reduction.entitlementPatch,
+    );
+    activatedValidTo =
+      typeof reduction.entitlementPatch.valid_to === 'string'
+        ? reduction.entitlementPatch.valid_to
+        : null;
+    activatedUserId = activatedUserId ?? context.entitlement.user_id;
   }
 
+  if (activatedValidTo && activatedUserId) {
+    await syncPosTenantSubscription(config, activatedUserId, activatedValidTo);
+  }
+
+  const subscriptionsTable = commerceTable(config, 'subscriptions');
   if (reduction.subscriptionAction === 'create' && reduction.subscriptionPatch !== null) {
-    await insertRow(config, 'subscriptions', reduction.subscriptionPatch);
+    await insertRow(config, subscriptionsTable, reduction.subscriptionPatch);
   } else if (
     reduction.subscriptionAction === 'update' &&
     reduction.subscriptionPatch !== null &&
@@ -186,7 +237,7 @@ async function applyPatches(
   ) {
     await updateRows(
       config,
-      'subscriptions',
+      subscriptionsTable,
       `id=eq.${escapeEq(context.subscription.id)}`,
       reduction.subscriptionPatch,
     );

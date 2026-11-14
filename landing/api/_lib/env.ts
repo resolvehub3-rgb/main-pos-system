@@ -2,17 +2,15 @@
  * Server-side configuration for the SamTill commerce API.
  *
  * SAFETY RULES ENFORCED HERE
- * 1. Values are read from the runtime process environment ONLY. There is no
- *    code path that reads `VITE_*` variables: Vite inlines those into the
- *    public browser bundle, so a secret must never use that prefix.
+ * 1. Secret values are read from server process environment ONLY. Secrets
+ *    never use the `VITE_` prefix and are never returned to browsers.
  * 2. The Paystack secret key must be a TEST key (`sk_test_...`) unless the
- *    operator explicitly sets ALLOW_LIVE_PAYMENTS=true. This makes it
- *    impossible for these functions to charge live money by accident.
- * 3. Missing or invalid configuration makes endpoints fail closed with
- *    HTTP 503 (`commerce_not_configured`) — never an insecure default.
- * 4. This module never logs values; only names/reasons leave this module.
- *
- * Variable names are documented in landing/docs/03-environment-variables.md.
+ *    operator explicitly sets ALLOW_LIVE_PAYMENTS=true.
+ * 3. Missing or invalid configuration makes endpoints fail closed with HTTP 503.
+ * 4. Supports both a unified Supabase project (`SUPABASE_URL` / `VITE_SUPABASE_URL`
+ *    + `SUPABASE_SERVICE_ROLE_KEY` using `commerce_*` tables) and a separate
+ *    commerce Supabase project (`SUPABASE_COMMERCE_URL` +
+ *    `SUPABASE_COMMERCE_SERVICE_ROLE_KEY`).
  */
 
 export type EnvBag = Record<string, string | undefined>;
@@ -22,7 +20,6 @@ function runtimeEnv(): EnvBag {
   return scope.process?.env ?? {};
 }
 
-/** Read one environment variable (trimmed; empty string -> undefined). */
 export function readEnv(name: string): string | undefined {
   const raw = runtimeEnv()[name];
   if (raw === undefined) return undefined;
@@ -30,64 +27,31 @@ export function readEnv(name: string): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
-/** Boolean flags: only the literal string "true" (case-insensitive) counts. */
-export function readFlag(name: string): boolean {
-  return (readEnv(name) ?? '').toLowerCase() === 'true';
+export function readFlag(name: string, defaultValue = false): boolean {
+  const raw = readEnv(name);
+  if (raw === undefined) return defaultValue;
+  return raw.toLowerCase() === 'true';
 }
 
-/**
- * Who may receive an installer download link:
- * - `entitlement`      (default): only customers with an active paid
- *                       entitlement — the pre-existing behaviour, unchanged
- *                       until the operator opts in to the other mode;
- * - `verified_account`: any customer who can sign in to the commerce project
- *                       (which, with "Confirm email" enabled there, means the
- *                       address was verified). Used while payments are
- *                       postponed so the registration → verify → login →
- *                       download journey works. Grants the installer FILE
- *                       only — it is NOT a POS licence activation.
- */
 export type DownloadAccessMode = 'entitlement' | 'verified_account';
 
 export interface CommerceConfig {
-  /** Commerce Supabase project URL, no trailing slash. */
   supabaseUrl: string;
-  /** Service-role key. Server-only; bypasses RLS; never sent to the browser. */
   supabaseServiceRoleKey: string;
-  /** HS256 secret used to verify Supabase Auth access tokens. */
-  authJwtSecret: string;
-  /** Paystack secret key. Test mode unless ALLOW_LIVE_PAYMENTS=true. */
+  /** Optional HS256 secret; when omitted or asymmetric, /auth/v1/user is used. */
+  authJwtSecret?: string;
+  /** Table prefix: `'commerce_'` on unified POS DB, `''` on standalone commerce DB. */
+  tablePrefix: string;
   paystackSecretKey: string;
-  /**
-   * HMAC secret for Paystack's `x-paystack-signature` header. Paystack signs
-   * with the integration secret key, so this defaults to paystackSecretKey
-   * and only needs to be set separately if you rotate a dedicated value.
-   */
   paystackWebhookSecret: string;
-  /** Public (publishable) Paystack key — optional, not used by these functions. */
   paystackPublicKey?: string;
   paystackMode: 'test' | 'live';
-  /** Public base URL of the site (no trailing slash) for Paystack callbacks. */
   appBaseUrl: string;
-  /** Private storage bucket holding the installer. */
   installerBucket: string;
-  /** Lifetime of generated signed download URLs, seconds (60..3600). */
   downloadLinkTtlSeconds: number;
-  /**
-   * Master gate for starting payments. Must be explicitly "true" and stays
-   * false until the owner approves the commercial decisions in
-   * landing/docs/01-commercial-decisions.md.
-   */
   checkoutEnabled: boolean;
-  /** Gate for publishing prices through /api/plans. Off until approval. */
   publishPrices: boolean;
-  /**
-   * Server-side access mode for POST /api/download. Defaults to
-   * `entitlement` (fail-closed to paid customers only). See
-   * DownloadAccessMode above and docs/03-environment-variables.md.
-   */
   downloadAccessMode: DownloadAccessMode;
-  /** Optional salt for hashing client IPs in audit/download records. */
   auditHashSalt?: string;
 }
 
@@ -101,7 +65,11 @@ const DEFAULT_DOWNLOAD_TTL = 300;
 function normalizeBaseUrl(value: string): string | null {
   try {
     const url = new URL(value);
-    if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+    if (
+      url.protocol !== 'https:' &&
+      url.hostname !== 'localhost' &&
+      url.hostname !== '127.0.0.1'
+    ) {
       return null;
     }
     return url.origin + (url.pathname === '/' ? '' : url.pathname.replace(/\/+$/, ''));
@@ -110,57 +78,121 @@ function normalizeBaseUrl(value: string): string | null {
   }
 }
 
-/**
- * Load and validate all commerce configuration.
- * Returns ok:false with the *names* of missing/invalid variables (never
- * values) so operators can fix setup without leaking anything.
- */
-export function getCommerceConfig(): ConfigResult {
+function resolveSupabaseBase(): {
+  missing: string[];
+  invalid: string[];
+  supabaseUrl?: string;
+  serviceRoleKey?: string;
+  authJwtSecret?: string;
+  tablePrefix: string;
+} {
   const missing: string[] = [];
   const invalid: string[] = [];
 
-  const need = (name: string): string | undefined => {
-    const value = readEnv(name);
-    if (value === undefined) missing.push(name);
-    return value;
-  };
-
-  const supabaseUrlRaw = need('SUPABASE_COMMERCE_URL');
-  const serviceRoleKey = need('SUPABASE_COMMERCE_SERVICE_ROLE_KEY');
-  const authJwtSecret = need('SUPABASE_AUTH_JWT_SECRET');
-  const paystackSecretKey = need('PAYSTACK_SECRET_KEY');
-  const appBaseUrlRaw = need('APP_BASE_URL');
-
-  let supabaseUrl: string | null = null;
-  if (supabaseUrlRaw !== undefined) {
-    supabaseUrl = normalizeBaseUrl(supabaseUrlRaw);
-    if (supabaseUrl === null) invalid.push('SUPABASE_COMMERCE_URL');
+  const explicitCommerceUrl = readEnv('SUPABASE_COMMERCE_URL');
+  const posUrl = readEnv('SUPABASE_URL') ?? readEnv('VITE_SUPABASE_URL');
+  const supabaseUrlRaw = explicitCommerceUrl ?? posUrl;
+  if (!supabaseUrlRaw) {
+    missing.push('SUPABASE_URL');
   }
 
-  if (serviceRoleKey !== undefined) {
-    if (serviceRoleKey.startsWith('sb_publishable_')) {
-      // Common mistake: pasting the publishable (client) key into the
-      // service-role slot. That key cannot bypass RLS and must not be used.
-      invalid.push('SUPABASE_COMMERCE_SERVICE_ROLE_KEY(wrong_key_class)');
-    } else if (!serviceRoleKey.startsWith('sb_secret_') && !serviceRoleKey.startsWith('ey')) {
-      invalid.push('SUPABASE_COMMERCE_SERVICE_ROLE_KEY');
-    }
+  const serviceRoleKey =
+    readEnv('SUPABASE_COMMERCE_SERVICE_ROLE_KEY') ?? readEnv('SUPABASE_SERVICE_ROLE_KEY');
+  if (!serviceRoleKey) {
+    missing.push('SUPABASE_SERVICE_ROLE_KEY');
   }
 
+  const authJwtSecret = readEnv('SUPABASE_AUTH_JWT_SECRET');
   if (authJwtSecret !== undefined && authJwtSecret.length < 16) {
     invalid.push('SUPABASE_AUTH_JWT_SECRET');
   }
 
+  let supabaseUrl: string | undefined;
+  if (supabaseUrlRaw !== undefined) {
+    const normalized = normalizeBaseUrl(supabaseUrlRaw);
+    if (normalized === null) invalid.push('SUPABASE_URL');
+    else supabaseUrl = normalized;
+  }
+
+  if (serviceRoleKey !== undefined) {
+    if (serviceRoleKey.startsWith('sb_publishable_')) {
+      invalid.push('SUPABASE_SERVICE_ROLE_KEY(wrong_key_class)');
+    } else if (!serviceRoleKey.startsWith('sb_secret_') && !serviceRoleKey.startsWith('ey')) {
+      invalid.push('SUPABASE_SERVICE_ROLE_KEY');
+    }
+  }
+
+  const normalizedPosUrl = posUrl ? normalizeBaseUrl(posUrl) : null;
+  const unifiedProject =
+    !explicitCommerceUrl || (normalizedPosUrl !== null && supabaseUrl === normalizedPosUrl);
+  const explicitPrefix = readEnv('COMMERCE_TABLE_PREFIX');
+  const tablePrefix = explicitPrefix ?? (unifiedProject ? 'commerce_' : '');
+
+  return {missing, invalid, supabaseUrl, serviceRoleKey, authJwtSecret, tablePrefix};
+}
+
+/**
+ * Configuration loader for endpoints that only need Supabase (`/api/plans`,
+ * `/api/subscription`, `/api/contact`) and do not initiate Paystack charges.
+ */
+export function getDatabaseConfig(request?: Request): ConfigResult {
+  const base = resolveSupabaseBase();
+  const appBaseUrlRaw = readEnv('APP_BASE_URL') ?? (request ? new URL(request.url).origin : undefined);
+  let appBaseUrl = 'http://localhost:3000';
+  if (appBaseUrlRaw) {
+    const normalized = normalizeBaseUrl(appBaseUrlRaw);
+    if (normalized) appBaseUrl = normalized;
+  }
+
+  if (base.missing.length > 0 || base.invalid.length > 0) {
+    return {ok: false, missing: base.missing, invalid: base.invalid};
+  }
+
+  return {
+    ok: true,
+    config: {
+      supabaseUrl: base.supabaseUrl as string,
+      supabaseServiceRoleKey: base.serviceRoleKey as string,
+      authJwtSecret: base.authJwtSecret,
+      tablePrefix: base.tablePrefix,
+      paystackSecretKey: readEnv('PAYSTACK_SECRET_KEY') ?? '',
+      paystackWebhookSecret: readEnv('PAYSTACK_WEBHOOK_SECRET') ?? readEnv('PAYSTACK_SECRET_KEY') ?? '',
+      paystackPublicKey: readEnv('PAYSTACK_PUBLIC_KEY'),
+      paystackMode: 'test',
+      appBaseUrl,
+      installerBucket: readEnv('INSTALLER_BUCKET') ?? 'installers',
+      downloadLinkTtlSeconds: DEFAULT_DOWNLOAD_TTL,
+      checkoutEnabled: readFlag('CHECKOUT_ENABLED', true),
+      publishPrices: readFlag('PUBLISH_PRICES', true),
+      downloadAccessMode: 'entitlement',
+      auditHashSalt: readEnv('AUDIT_HASH_SALT'),
+    },
+  };
+}
+
+/**
+ * Full configuration loader for Paystack payment & verification endpoints.
+ */
+export function getCommerceConfig(request?: Request): ConfigResult {
+  const base = resolveSupabaseBase();
+  const missing = [...base.missing];
+  const invalid = [...base.invalid];
+
+  const paystackSecretKey = readEnv('PAYSTACK_SECRET_KEY');
+  if (!paystackSecretKey) missing.push('PAYSTACK_SECRET_KEY');
+
+  const appBaseUrlRaw =
+    readEnv('APP_BASE_URL') ?? (request ? new URL(request.url).origin : undefined);
+  if (!appBaseUrlRaw) missing.push('APP_BASE_URL');
+
   let paystackMode: 'test' | 'live' = 'test';
   if (paystackSecretKey !== undefined) {
     if (!paystackSecretKey.startsWith('sk_')) {
-      // Catches pasting the publishable key (pk_...) into the secret slot.
       invalid.push('PAYSTACK_SECRET_KEY');
     } else if (!paystackSecretKey.startsWith('sk_test_')) {
-      if (readFlag('ALLOW_LIVE_PAYMENTS')) {
+      if (readFlag('ALLOW_LIVE_PAYMENTS', false)) {
         paystackMode = 'live';
       } else {
-        // Refuse live keys unless live payments are explicitly allowed.
         invalid.push('PAYSTACK_SECRET_KEY(not_test_mode)');
       }
     }
@@ -177,8 +209,6 @@ export function getCommerceConfig(): ConfigResult {
     invalid.push('INSTALLER_BUCKET');
   }
 
-  // Download access mode: explicit opt-in, safe default. An unknown value is
-  // a configuration error (fail closed), never a silent fallback.
   let downloadAccessMode: DownloadAccessMode = 'entitlement';
   const downloadModeRaw = readEnv('DOWNLOAD_ACCESS_MODE');
   if (downloadModeRaw !== undefined) {
@@ -208,9 +238,10 @@ export function getCommerceConfig(): ConfigResult {
   return {
     ok: true,
     config: {
-      supabaseUrl: supabaseUrl as string,
-      supabaseServiceRoleKey: serviceRoleKey as string,
-      authJwtSecret: authJwtSecret as string,
+      supabaseUrl: base.supabaseUrl as string,
+      supabaseServiceRoleKey: base.serviceRoleKey as string,
+      authJwtSecret: base.authJwtSecret,
+      tablePrefix: base.tablePrefix,
       paystackSecretKey: paystackSecretKey as string,
       paystackWebhookSecret: readEnv('PAYSTACK_WEBHOOK_SECRET') ?? (paystackSecretKey as string),
       paystackPublicKey: readEnv('PAYSTACK_PUBLIC_KEY'),
@@ -218,8 +249,8 @@ export function getCommerceConfig(): ConfigResult {
       appBaseUrl: appBaseUrl as string,
       installerBucket,
       downloadLinkTtlSeconds,
-      checkoutEnabled: readFlag('CHECKOUT_ENABLED'),
-      publishPrices: readFlag('PUBLISH_PRICES'),
+      checkoutEnabled: readFlag('CHECKOUT_ENABLED', true),
+      publishPrices: readFlag('PUBLISH_PRICES', true),
       downloadAccessMode,
       auditHashSalt: readEnv('AUDIT_HASH_SALT'),
     },

@@ -52,6 +52,7 @@ import {
   type SalesViewFilters,
 } from '../lib/salesViewFilters';
 import { db } from '../lib/supabaseClient';
+import { sectionForShopOwnerPath, shopOwnerPathForSection } from '../lib/roleRoute';
 import { playScannerBeep } from '../lib/sound';
 import { useTerminalSettings, updateTerminalSettings } from '../lib/terminalSettings';
 import { DEFAULT_RECEIPT_FOOTER, receiptFooterText } from '../lib/receiptFooter';
@@ -108,7 +109,7 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   onOpenPOS,
   onOpenCustomerDisplay,
 }) => {
-  const [activeMenu, setActiveMenu] = useState<
+  const [activeMenu, setActiveMenuState] = useState<
     | 'overview'
     | 'sales'
     | 'inventory'
@@ -120,7 +121,31 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
     | 'expenses'
     | 'reports'
     | 'settings'
-  >('overview');
+  >(() =>
+    typeof window !== 'undefined'
+      ? sectionForShopOwnerPath(window.location.pathname).section
+      : 'overview',
+  );
+
+  const setActiveMenu = (
+    section:
+      | 'overview'
+      | 'sales'
+      | 'inventory'
+      | 'products'
+      | 'stockbook'
+      | 'categories'
+      | 'customers'
+      | 'staff'
+      | 'expenses'
+      | 'reports'
+      | 'settings',
+  ) => {
+    setActiveMenuState(section);
+    if (typeof window !== 'undefined' && window.history?.replaceState) {
+      window.history.replaceState({}, '', shopOwnerPathForSection(section, false));
+    }
+  };
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -798,6 +823,26 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Subscription expiry notice (shown only when real tenant subscription is expired) */}
+        {(currentTenant.subscription_status === 'expired' ||
+          (currentTenant.subscription_expires_at &&
+            Date.parse(currentTenant.subscription_expires_at) <= Date.now())) && (
+          <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-950">
+            <div>
+              <p className="font-bold">Your 6-Month SamTill POS subscription has expired</p>
+              <p className="text-xs text-amber-900 mt-0.5">
+                Renew with a single upfront payment of GH₵500.00 to restore full 6-month access.
+              </p>
+            </div>
+            <a
+              href="/#/checkout?plan=samtill-6m"
+              className="inline-flex items-center justify-center rounded-xl bg-[#F28C28] px-4 py-2 text-xs font-bold text-white hover:bg-orange-600 transition shrink-0"
+            >
+              Renew Subscription (GH₵500.00) →
+            </a>
+          </div>
+        )}
 
         {/* 1. OVERVIEW VIEW */}
         {activeMenu === 'overview' && (

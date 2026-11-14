@@ -1,19 +1,25 @@
 /**
- * Hash-based routing helpers (pure).
+ * Marketing + Customer Account routing helpers (pure).
  *
- * The marketing site is a static single-page build with no server rewrites,
- * so account screens live behind hash routes: `#/register`, `#/login`,
- * `#/verify`, `#/forgot-password`, `#/reset-password`, `#/account`,
- * `#/checkout`. Anything that does not start with `#/` (e.g.
- * the section anchors `#features`, `#contact`) is NOT a route and keeps its
- * normal scroll behaviour.
- *
- * Email links append their query string to the configured redirect URL, so a
- * redirect of `https://site/#/verify` arrives as
- * `https://site/#/verify?token_hash=…&type=signup` (parameters inside the
- * fragment), while a plain Site URL arrives as `/?token_hash=…&type=signup`
- * (parameters in the real query). Both shapes are handled below.
+ * Supports BOTH:
+ *   1. Clean browser pathnames for the public marketing website:
+ *        `/`, `/features`, `/pricing`, `/about`, `/contact`, `/download`
+ *      and customer billing/account pages:
+ *        `/account`, `/checkout`, `/verify`, `/forgot-password`, `/reset-password`
+ *   2. Hash routes for full static backwards compatibility (`#/register`,
+ *      `#/login`, `#/checkout`, `#/pricing`, etc.).
  */
+
+export const MARKETING_ROUTES = [
+  '/',
+  '/features',
+  '/pricing',
+  '/about',
+  '/contact',
+  '/download',
+] as const;
+
+export type MarketingRoute = (typeof MARKETING_ROUTES)[number];
 
 export const ACCOUNT_ROUTES = [
   '/register',
@@ -29,9 +35,7 @@ export const ACCOUNT_ROUTES = [
 export type AccountRoute = (typeof ACCOUNT_ROUTES)[number];
 
 export interface ParsedRoute {
-  /** '/' for the marketing home page; otherwise a path like '/register'. */
   path: string;
-  /** Merged parameters: real query string first, then hash query. */
   params: URLSearchParams;
 }
 
@@ -42,33 +46,44 @@ function splitFragment(raw: string): {path: string; query: string} {
   return {path: fragment.slice(0, index), query: fragment.slice(index + 1)};
 }
 
-/**
- * Parse the current location into a route. Section anchors such as
- * `#features` return path '/' (home) with no parameters.
- */
-export function parseRoute(hash: string, search: string): ParsedRoute {
-  const realQuery = search.startsWith('?') ? search.slice(1) : search;
+function normalizePath(rawPath: string): string {
+  if (!rawPath || rawPath === '/') return '/';
+  const trimmed = rawPath.replace(/\/+$/, '');
+  return trimmed === '' ? '/' : trimmed;
+}
 
-  // A section anchor (no leading slash) is not a route — treat as home.
-  if (hash !== '' && !hash.startsWith('#/')) {
-    return {path: '/', params: new URLSearchParams(realQuery)};
+/**
+ * Parse the current location (hash + search + optional pathname) into a route.
+ * Hash routes (`#/checkout`) take precedence when present so `#/login` and
+ * `#/register` continue working without colliding with `/app/login`.
+ */
+export function parseRoute(hash: string, search: string, pathname = '/'): ParsedRoute {
+  const realQuery = search.startsWith('?') ? search.slice(1) : search;
+  const params = new URLSearchParams(realQuery);
+
+  if (hash.startsWith('#/')) {
+    const {path, query} = splitFragment(hash);
+    const fromHash = new URLSearchParams(query);
+    fromHash.forEach((value, key) => {
+      if (!params.has(key)) params.set(key, value);
+    });
+    return {path: normalizePath(path), params};
   }
 
-  const {path, query} = splitFragment(hash);
-  const params = new URLSearchParams(realQuery);
-  const fromHash = new URLSearchParams(query);
-  fromHash.forEach((value, key) => {
-    // The real query string wins: it is what the email provider appended to
-    // the bare Site URL, and it is unambiguous.
-    if (!params.has(key)) params.set(key, value);
-  });
+  const normalizedPath = normalizePath(pathname);
+  if (normalizedPath !== '/') {
+    return {path: normalizedPath, params};
+  }
 
-  const normalized = path === '' || path === '/' ? '/' : path.replace(/\/+$/, '');
-  return {path: normalized === '' ? '/' : normalized, params};
+  return {path: '/', params};
 }
 
 export function isAccountRoute(path: string): path is AccountRoute {
   return (ACCOUNT_ROUTES as readonly string[]).includes(path);
+}
+
+export function isMarketingRoute(path: string): path is MarketingRoute {
+  return (MARKETING_ROUTES as readonly string[]).includes(path);
 }
 
 export type VerificationParams =
@@ -76,12 +91,6 @@ export type VerificationParams =
   | {mode: 'code'; code: string}
   | null;
 
-/**
- * Pull email-verification / recovery parameters out of a parsed route.
- * - `token_hash` + `type`  → supabase.auth.verifyOtp(...)
- * - `code`                 → supabase.auth.exchangeCodeForSession (PKCE)
- * Returns null when neither is present, so a plain visit renders the form.
- */
 export function verificationParams(params: URLSearchParams): VerificationParams {
   const tokenHash = params.get('token_hash');
   const type = params.get('type');

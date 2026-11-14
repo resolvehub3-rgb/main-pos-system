@@ -1,19 +1,12 @@
 import {useEffect, useState} from 'react';
-import {COMMERCE} from '../config/commerce';
 import {NAV_LINKS, SITE} from '../config/site';
-import {accountAvailability} from '../lib/availability';
-import {readCommerceEnv} from '../lib/commerceClient';
+import {navigateRoute} from '../lib/navigation';
+import {useHashRoute} from '../lib/useHashRoute';
+import SmartInstallButton from './SmartInstallButton';
 
 export default function Nav() {
   const [open, setOpen] = useState(false);
-
-  // Account links appear only when the owner switches them on AND
-  // the deployment is actually configured — no promises the site cannot keep.
-  const accountGate = accountAvailability(COMMERCE, readCommerceEnv());
-  const accountLinks = [
-    ...(accountGate.available ? [{label: 'Sign in', href: '/login'}] : []),
-  ];
-  const registerCta = {label: 'Register', href: '/register'};
+  const route = useHashRoute();
 
   useEffect(() => {
     const onResize = () => {
@@ -29,7 +22,14 @@ export default function Nav() {
         aria-label="Main"
         className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:h-[72px] lg:px-8"
       >
-        <a href="#top" className="flex items-center gap-3">
+        <a
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            navigateRoute('/');
+          }}
+          className="flex items-center gap-3"
+        >
           <img
             src={SITE.logoSrc}
             alt=""
@@ -45,41 +45,34 @@ export default function Nav() {
           </span>
         </a>
 
-        <ul className="hidden items-center gap-8 lg:flex">
-          {NAV_LINKS.map((link) => (
-            <li key={link.href}>
-              <a
-                href={link.href}
-                className="text-sm font-semibold text-navy-100 transition-colors hover:text-amber-400"
-              >
-                {link.label}
-              </a>
-            </li>
-          ))}
-          {accountLinks.map((link) => (
-            <li key={link.href}>
-              <a
-                href={link.href}
-                className="text-sm font-semibold text-amber-300 transition-colors hover:text-amber-400"
-              >
-                {link.label}
-              </a>
-            </li>
-          ))}
+        <ul className="hidden items-center gap-7 lg:flex">
+          {NAV_LINKS.map((link) => {
+            const active = route.path === link.href;
+            return (
+              <li key={link.href}>
+                <a
+                  href={link.href}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    navigateRoute(link.href);
+                  }}
+                  aria-current={active ? 'page' : undefined}
+                  className={`text-sm font-semibold transition-colors ${
+                    active ? 'text-amber-400' : 'text-navy-100 hover:text-amber-400'
+                  }`}
+                >
+                  {link.label}
+                </a>
+              </li>
+            );
+          })}
         </ul>
 
         <div className="hidden items-center gap-3 lg:flex">
-          {registerCta && (
-            <a
-              href={registerCta.href}
-              className="inline-flex items-center rounded-full border border-amber-500 px-5 py-2.5 text-sm font-bold text-amber-300 transition-colors hover:bg-amber-500/10 hover:text-amber-200"
-            >
-              {registerCta.label}
-            </a>
-          )}
+          <SmartInstallButton variant="nav" />
           <a
-            href="/login"
-            className="inline-flex items-center rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
+            href={SITE.loginUrl}
+            className="inline-flex items-center rounded-full bg-amber-700 px-5 py-2 text-sm font-bold text-white transition-colors hover:bg-amber-800"
           >
             Login
           </a>
@@ -118,44 +111,29 @@ export default function Nav() {
             <li key={link.href}>
               <a
                 href={link.href}
-                onClick={() => setOpen(false)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  setOpen(false);
+                  navigateRoute(link.href);
+                }}
                 className="block rounded-lg px-3 py-3 text-base font-semibold text-navy-100 transition-colors hover:bg-navy-800 hover:text-amber-400"
               >
                 {link.label}
               </a>
             </li>
           ))}
+          <li className="mt-3">
+            <SmartInstallButton variant="mobile" onAction={() => setOpen(false)} />
+          </li>
           <li className="mt-2">
             <a
-              href="/login"
+              href={SITE.loginUrl}
               onClick={() => setOpen(false)}
               className="block rounded-full bg-amber-700 px-5 py-3 text-center text-base font-bold text-white transition-colors hover:bg-amber-800"
             >
               Login
             </a>
           </li>
-          {registerCta && (
-            <li className="mt-2">
-              <a
-                href={registerCta.href}
-                onClick={() => setOpen(false)}
-                className="block rounded-full border border-amber-500 px-5 py-3 text-center text-base font-bold text-amber-300 transition-colors hover:bg-amber-500/10"
-              >
-                {registerCta.label}
-              </a>
-            </li>
-          )}
-          {accountLinks.map((link) => (
-            <li key={link.href} className="mt-1">
-              <a
-                href={link.href}
-                onClick={() => setOpen(false)}
-                className="block rounded-lg px-3 py-3 text-base font-semibold text-amber-300 transition-colors hover:bg-navy-800 hover:text-amber-400"
-              >
-                {link.label}
-              </a>
-            </li>
-          ))}
         </ul>
       </div>
     </header>

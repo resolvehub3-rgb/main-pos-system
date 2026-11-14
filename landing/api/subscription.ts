@@ -15,7 +15,7 @@
  */
 
 import {loadEntitlementsForUser, loadSubscriptionForUser, type SubscriptionRowFull} from './_lib/context.ts';
-import {getCommerceConfig} from './_lib/env.ts';
+import {getDatabaseConfig} from './_lib/env.ts';
 import {apiError, json, methodGuard, notConfigured, readJsonBody} from './_lib/http.ts';
 import {requireSession} from './_lib/session.ts';
 
@@ -37,7 +37,7 @@ export async function GET(request: Request): Promise<Response> {
   const guard = methodGuard(request, 'GET');
   if (guard) return guard;
 
-  const configResult = getCommerceConfig();
+  const configResult = getDatabaseConfig(request);
   if (!configResult.ok) return notConfigured(configResult.missing, configResult.invalid);
   const config = configResult.config;
 
@@ -74,7 +74,7 @@ export async function POST(request: Request): Promise<Response> {
   const guard = methodGuard(request, 'POST');
   if (guard) return guard;
 
-  const configResult = getCommerceConfig();
+  const configResult = getDatabaseConfig(request);
   if (!configResult.ok) return notConfigured(configResult.missing, configResult.invalid);
   const config = configResult.config;
 

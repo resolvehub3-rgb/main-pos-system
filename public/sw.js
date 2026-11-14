@@ -1,32 +1,26 @@
 /**
  * SamTill POS service worker.
  *
- * Caching policy (see docs/DEPLOYMENT.md §PWA):
- *  - SAME-ORIGIN static assets only. Requests to any other origin
- *    (Supabase REST/Auth/Realtime, Google Fonts, the print bridge on
- *    127.0.0.1) are never intercepted beyond passing them through, and
- *    their responses are NEVER put in a cache — they carry auth tokens,
- *    private customer data or financial records.
- *  - Non-GET requests are never cached (no POST/PUT/DELETE ever touches
- *    this worker's caches), so sales and payment operations cannot be
- *    duplicated by a replaying cache.
- *  - Hashed build assets (/assets/*) are cache-first: their filenames
- *    change on every build, so a cached copy is always the exact version.
- *  - Navigations are network-first with the cached shell as the offline
- *    fallback: an online till always runs the newest code, an offline till
- *    keeps running the last version it saw.
- *
- * The app's data lives in localStorage (local-first); this worker only
- * caches the application shell, never the data.
+ * Caching policy:
+ *  - SAME-ORIGIN static assets only. Requests to `/api/*` or any other origin
+ *    (Supabase REST/Auth/Realtime, Paystack, print bridge on 127.0.0.1) are
+ *    never intercepted beyond passing through and are NEVER cached.
+ *  - Non-GET requests are never cached.
+ *  - Hashed build assets (/assets/*) are cache-first.
+ *  - Navigations are network-first with STRICT separation between `/app/*` POS
+ *    routes and `/` marketing routes — offline `/app/*` navigations never fall
+ *    back to the `/` marketing shell.
  */
 
-const VERSION = 'samtill-v1';
+const VERSION = 'samtill-v2';
 const SHELL_CACHE = `${VERSION}-shell`;
 const ASSET_CACHE = `${VERSION}-assets`;
 
-/** The app shell: entry page, manifest and brand icons. */
+const APP_FALLBACK_URL = '/app/login';
+
+/** The POS app shell & static assets (never caches `/` marketing HTML into POS fallback). */
 const SHELL_URLS = [
-  '/',
+  APP_FALLBACK_URL,
   '/manifest.json',
   '/logo.png',
   '/icon-192.png',
@@ -39,8 +33,6 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
       const shell = await caches.open(SHELL_CACHE);
-      // addAll fails the whole install if ANY url fails; add each one so a
-      // single missing icon cannot break installation.
       await Promise.all(
         SHELL_URLS.map((url) =>
           shell.add(new Request(url, { cache: 'reload' })).catch(() => undefined),
@@ -48,14 +40,11 @@ self.addEventListener('install', (event) => {
       );
     })(),
   );
-  // No skipWaiting here: a new version waits for the user to press Update
-  // (see src/lib/pwa.ts) so an active checkout is never torn down.
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      // Drop caches from older versions.
       const names = await caches.keys();
       await Promise.all(
         names
@@ -73,17 +62,22 @@ self.addEventListener('message', (event) => {
   }
 });
 
-/** Same-origin GET only — everything else passes straight through. */
+/** Same-origin GET only, excluding /api/* endpoints. */
 function isCacheable(request) {
   if (request.method !== 'GET') return false;
   const url = new URL(request.url);
-  return url.origin === self.location.origin;
+  if (url.origin !== self.location.origin) return false;
+  if (url.pathname.startsWith('/api/')) return false;
+  return true;
+}
+
+function isAppPath(pathname) {
+  return pathname === '/app' || pathname.startsWith('/app/');
 }
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
 
-  // Never touch non-GET or cross-origin traffic (Supabase, fonts, bridge).
   if (!isCacheable(request)) return;
 
   const url = new URL(request.url);
@@ -100,25 +94,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Everything else same-origin (icons, manifest, robots…): cache on first
-  // use, revalidate in the background.
   event.respondWith(staleWhileRevalidate(request, ASSET_CACHE));
 });
 
-/** Online → always fresh (never serve the app an old version silently). */
+/** Online → always fresh. Offline → strict `/app/login` vs `/` shell separation. */
 async function networkFirstNavigation(request) {
+  const url = new URL(request.url);
+  const appRoute = isAppPath(url.pathname);
+  const fallbackKey = appRoute ? APP_FALLBACK_URL : '/';
+
   try {
     const response = await fetch(request);
     if (response && response.ok) {
       const shell = await caches.open(SHELL_CACHE);
-      shell.put('/', response.clone());
+      shell.put(fallbackKey, response.clone());
     }
     return response;
   } catch {
-    const cached = (await caches.match('/')) || (await caches.match(request));
+    const cached = (await caches.match(request)) || (await caches.match(fallbackKey));
     if (cached) return cached;
-    // Last resort: a minimal offline notice (no cache at all — first visit
-    // was offline).
     return new Response(
       '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Offline — SamTill POS</title></head>' +
         '<body style="font-family:sans-serif;background:#102A4C;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center">' +
@@ -129,7 +123,6 @@ async function networkFirstNavigation(request) {
   }
 }
 
-/** Hashed build assets never change under the same URL. */
 async function cacheFirst(request, cacheName) {
   const cached = await caches.match(request);
   if (cached) return cached;
@@ -141,7 +134,6 @@ async function cacheFirst(request, cacheName) {
   return response;
 }
 
-/** Serve the cached copy instantly, refresh it in the background. */
 async function staleWhileRevalidate(request, cacheName) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);

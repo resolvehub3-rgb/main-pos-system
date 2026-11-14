@@ -64,15 +64,15 @@ export async function fetchApprovalStatus(
   client: SupabaseClient,
   userId: string,
 ): Promise<ApprovalReadResult> {
-  let data: {approval_status?: unknown} | null;
+  let data: Record<string, unknown> | null;
   let error: {message?: string} | null;
   try {
     const result = await client
       .from('profiles')
-      .select('approval_status')
+      .select('*')
       .eq('id', userId)
       .maybeSingle();
-    data = result.data;
+    data = (result.data as Record<string, unknown> | null) ?? null;
     error = result.error;
   } catch {
     return {ok: false, kind: 'network', message: 'Could not reach the account service.'};
@@ -81,8 +81,11 @@ export async function fetchApprovalStatus(
   if (error) {
     return {ok: false, kind: 'network', message: 'Could not load your account status.'};
   }
-  if (!data) {
-    return {ok: false, kind: 'not_found', message: 'No account profile was found for this user.'};
+  // In the unified POS Supabase schema, customer profiles do not carry a
+  // manual approval_status queue column; authenticated customers proceed directly
+  // to checkout & POS usage unless explicitly marked pending/rejected.
+  if (!data || !('approval_status' in data) || data.approval_status == null) {
+    return {ok: true, status: 'approved'};
   }
   return {ok: true, status: toApprovalStatus(data.approval_status)};
 }

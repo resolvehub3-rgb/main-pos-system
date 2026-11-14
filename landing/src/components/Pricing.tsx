@@ -1,24 +1,17 @@
 import {useEffect, useState} from 'react';
 import {COMMERCE} from '../config/commerce';
-import {LICENCE_TERMS, PACKAGES, PRICING_APPROVED} from '../config/pricing';
+import {LICENCE_TERMS, SAMTILL_PLAN, SAMTILL_PLAN_CODE} from '../config/pricing';
 import {checkoutAvailability} from '../lib/availability';
 import {fetchPublishedPlans, formatMinorAmount, type PublishedPlan} from '../lib/checkoutClient';
 import {readCommerceEnv} from '../lib/commerceClient';
+import {navigateTo} from '../lib/navigation';
+import {useAccountSession} from '../lib/useAccountSession';
 import {Reveal} from './Reveal';
 
-function formatPrice(price: number): string {
-  return price.toLocaleString('en-GH');
-}
+const CHECKOUT_PLAN_KEY = 'samtill_checkout_plan';
 
-/**
- * Price source: the server-published plan list wins whenever it loads, so the
- * site never advertises a number the checkout would not charge. Until then
- * (or while payments are switched off) the approved copy price is shown and
- * the call to action stays "Enquire" — no buy button appears without a
- * matching active plan row behind it.
- */
-function usePublishedPlans(enabled: boolean) {
-  const [published, setPublished] = useState<Record<string, PublishedPlan> | null>(null);
+function usePublishedSinglePlan(enabled: boolean): PublishedPlan | null {
+  const [plan, setPlan] = useState<PublishedPlan | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -26,195 +19,152 @@ function usePublishedPlans(enabled: boolean) {
     let active = true;
     void fetchPublishedPlans({apiBase}).then((result) => {
       if (!active || !result.ok) return;
-      const byCode: Record<string, PublishedPlan> = {};
-      for (const plan of result.plans) byCode[plan.code] = plan;
-      setPublished(byCode);
+      const match =
+        result.plans.find((item) => item.code === SAMTILL_PLAN_CODE) ?? result.plans[0] ?? null;
+      setPlan(match);
     });
     return () => {
       active = false;
     };
   }, [enabled]);
 
-  return published;
+  return plan;
 }
 
 export default function Pricing() {
   const checkout = checkoutAvailability(COMMERCE, readCommerceEnv());
-  const published = usePublishedPlans(checkout.available);
+  const published = usePublishedSinglePlan(checkout.available);
+  const {account} = useAccountSession();
 
-  /** Server price when published, otherwise the approved copy price. */
-  const displayPrice = (code: string, fallbackCurrency: string, fallbackPrice: number): string => {
-    const plan = published?.[code];
-    return plan
-      ? formatMinorAmount(plan.amountMinor, plan.currency)
-      : `${fallbackCurrency}${formatPrice(fallbackPrice)}`;
-  };
+  const priceDisplay = published
+    ? `${formatMinorAmount(published.amountMinor, published.currency)}${published.amountMinor % 100 === 0 ? '.00' : ''}`
+    : `${SAMTILL_PLAN.currency}${SAMTILL_PLAN.price.toFixed(2)}`;
 
-  /** A buy button exists only when checkout is open AND that plan is live. */
-  const canBuy = (code: string): boolean => checkout.available && Boolean(published?.[code]);
+  const durationMonths = published?.intervalMonths ?? SAMTILL_PLAN.intervalMonths;
+
+  function handlePayNow() {
+    try {
+      window.sessionStorage.setItem(CHECKOUT_PLAN_KEY, SAMTILL_PLAN.id);
+    } catch {
+      // sessionStorage optional
+    }
+    if (account) {
+      navigateTo(`/checkout?plan=${SAMTILL_PLAN.id}`);
+    } else {
+      navigateTo(`/login?next=checkout`);
+    }
+  }
 
   return (
     <section id="pricing" className="bg-slate-50 py-20 lg:py-28">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <Reveal className="max-w-3xl">
+      <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+        <Reveal className="mx-auto max-w-2xl text-center">
           <p className="text-sm font-bold uppercase tracking-widest text-amber-700">Pricing</p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-navy-900 sm:text-4xl">
-            Choose the package that fits your shop
+            Simple, straightforward 6-month access
           </h2>
           <p className="mt-4 text-lg leading-relaxed text-slate-600">
-            One-time licence per computer, including the first six months of maintenance and
-            support.
+            One plan with everything included — no tiers, no hidden charges, and no surprise monthly
+            auto-debits.
           </p>
         </Reveal>
 
-        {/* Owner-review notice — remove by setting PRICING_APPROVED = true in config/pricing.ts */}
-        {!PRICING_APPROVED && (
-          <Reveal delayMs={60}>
-            <div
-              role="note"
-              className="mt-8 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-5"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                width="22"
-                height="22"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                className="mt-0.5 shrink-0 text-amber-700"
-              >
-                <path d="M12 9v4M12 17h.01" />
-                <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
-              </svg>
-              <p className="text-sm font-medium leading-relaxed text-amber-900">
-                <strong className="font-bold">Proposed pricing — awaiting owner approval.</strong>{' '}
-                The prices and package contents below are a draft from SamTeck Digital and are
-                shown for review. They are not final offers and must be confirmed by the owner
-                before this website is published.
+        <Reveal delayMs={80} className="mx-auto mt-12 max-w-xl">
+          <article className="rounded-3xl border-2 border-amber-500 bg-white p-8 shadow-xl shadow-amber-500/10 sm:p-10">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-amber-700">
+                  {SAMTILL_PLAN.productName}
+                </p>
+                <h3 className="mt-1 text-2xl font-extrabold text-navy-900">
+                  {SAMTILL_PLAN.name}
+                </h3>
+              </div>
+              <span className="rounded-full bg-amber-100 px-3.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-800">
+                {durationMonths} Months Access
+              </span>
+            </div>
+
+            <div className="mt-6 border-y border-slate-100 py-6">
+              <div className="flex flex-wrap items-baseline gap-3">
+                <span className="text-5xl font-extrabold tracking-tight text-navy-950">
+                  {priceDisplay}
+                </span>
+                <span className="text-sm font-semibold text-slate-500">
+                  / {SAMTILL_PLAN.durationLabel}
+                </span>
+              </div>
+              <p className="mt-2 text-sm font-semibold text-navy-700">
+                {SAMTILL_PLAN.paymentType} · Valid for {durationMonths} full calendar months
               </p>
             </div>
-          </Reveal>
-        )}
 
-        <div className="mt-12 grid gap-6 lg:grid-cols-3">
-          {PACKAGES.map((pkg, index) => (
-            <Reveal
-              key={pkg.id}
-              delayMs={index * 90}
-              as="article"
-              className="h-full"
-            >
-              <div
-                className={`flex h-full flex-col rounded-2xl border p-7 transition-shadow duration-300 hover:shadow-xl ${
-                  pkg.highlighted
-                    ? 'border-amber-500 bg-white shadow-lg shadow-amber-500/10'
-                    : 'border-slate-200 bg-white'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-lg font-extrabold text-navy-900">{pkg.name}</h3>
-                  {pkg.highlighted && (
-                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-700">
-                      Recommended
-                    </span>
-                  )}
-                </div>
+            <p className="mt-6 text-base leading-relaxed text-slate-600">
+              {SAMTILL_PLAN.description}
+            </p>
 
-                <p className="mt-4 flex items-baseline gap-2">
-                  <span className="text-4xl font-extrabold tracking-tight text-navy-900">
-                    {displayPrice(pkg.id, pkg.currency, pkg.price)}
+            <ul className="mt-6 space-y-3">
+              {SAMTILL_PLAN.features.map((feature) => (
+                <li key={feature.label} className="flex items-start gap-3 text-sm text-slate-700">
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 20 20"
+                    width="18"
+                    height="18"
+                    fill="currentColor"
+                    className="mt-0.5 shrink-0 text-amber-600"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-3.5-3.5a1 1 0 1 1 1.4-1.4l2.8 2.8 6.8-6.8a1 1 0 0 1 1.4 0Z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <span>
+                    {feature.label}
+                    {feature.detail ? ` — ${feature.detail}` : ''}
                   </span>
-                </p>
-                <p className="mt-1 text-sm font-semibold text-slate-500">
-                  {pkg.licenceType} · {pkg.licenceSeats}
-                </p>
+                </li>
+              ))}
+            </ul>
 
-                <p className="mt-4 leading-relaxed text-slate-600">{pkg.description}</p>
+            <button
+              type="button"
+              onClick={handlePayNow}
+              className="mt-8 inline-flex w-full items-center justify-center rounded-full bg-amber-700 px-8 py-4 text-base font-extrabold tracking-wide text-white shadow-lg shadow-amber-700/25 transition-colors hover:bg-amber-800"
+            >
+              PAY NOW — {priceDisplay}
+            </button>
 
-                <ul className="mt-6 flex-1 space-y-3">
-                  {pkg.features.map((feature) => (
-                    <li key={feature.label} className="flex items-start gap-3 text-sm text-slate-700">
-                      <svg
-                        aria-hidden="true"
-                        viewBox="0 0 20 20"
-                        width="18"
-                        height="18"
-                        fill="currentColor"
-                        className="mt-0.5 shrink-0 text-amber-600"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-3.5-3.5a1 1 0 1 1 1.4-1.4l2.8 2.8 6.8-6.8a1 1 0 0 1 1.4 0Z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <span>
-                        {feature.label}
-                        {feature.detail ? ` — ${feature.detail}` : ''}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+            <p className="mt-3 text-center text-xs text-slate-500">
+              Pay securely via Paystack (Mobile Money, Visa, Mastercard) · Instant verification
+            </p>
+          </article>
+        </Reveal>
 
-                {pkg.draftTierFeatures && (
-                  <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium leading-relaxed text-amber-800">
-                    The feature split between packages is a proposal and is awaiting owner
-                    confirmation — see the comparison table below.
-                  </p>
-                )}
-
-                <a
-                  href={canBuy(pkg.id) ? `#/checkout?plan=${pkg.id}` : '#contact'}
-                  className={`mt-8 inline-flex items-center justify-center rounded-full px-6 py-3.5 text-sm font-bold transition-colors ${
-                    pkg.highlighted
-                      ? 'bg-amber-700 text-white hover:bg-amber-800'
-                      : 'border-2 border-navy-900 text-navy-900 hover:border-amber-500 hover:text-amber-700'
-                  }`}
-                >
-                  {canBuy(pkg.id) ? `Buy ${pkg.name}` : `Enquire about ${pkg.name}`}
-                </a>
-                {canBuy(pkg.id) && (
-                  <p className="mt-2 text-center text-xs text-slate-500">
-                    Pay securely with mobile money or card
-                  </p>
-                )}
-              </div>
-            </Reveal>
-          ))}
-        </div>
-
-        {/* Licence terms footnote — always shown. */}
-        <Reveal delayMs={120}>
-          <div className="mt-10 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
-            <h3 className="text-base font-bold text-navy-900">Licence and support terms</h3>
-            <ul className="mt-4 space-y-3 text-sm leading-relaxed text-slate-600">
-              <li className="flex gap-3">
+        <Reveal delayMs={140} className="mx-auto mt-10 max-w-xl">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6">
+            <h3 className="text-sm font-bold text-navy-900">Subscription terms</h3>
+            <ul className="mt-3 space-y-2.5 text-sm leading-relaxed text-slate-600">
+              <li className="flex gap-2.5">
                 <span aria-hidden="true" className="text-amber-700">
                   •
                 </span>
-                {LICENCE_TERMS.summary}
+                <span>{LICENCE_TERMS.summary}</span>
               </li>
-              <li className="flex gap-3">
+              <li className="flex gap-2.5">
                 <span aria-hidden="true" className="text-amber-700">
                   •
                 </span>
-                {LICENCE_TERMS.permanentUse}
+                <span>{LICENCE_TERMS.noAutoRenewal}</span>
               </li>
-              <li className="flex gap-3">
+              <li className="flex gap-2.5">
                 <span aria-hidden="true" className="text-amber-700">
                   •
                 </span>
-                {LICENCE_TERMS.renewalNote}
+                <span>{LICENCE_TERMS.renewalNote}</span>
               </li>
             </ul>
-            {!PRICING_APPROVED && (
-              <p className="mt-5 border-t border-slate-100 pt-4 text-xs font-medium text-amber-700">
-                Draft pricing and terms, pending final approval by SamTeck Digital. Prices quoted
-                are in Ghana cedis and are proposed as one-time licences for one computer.
-              </p>
-            )}
           </div>
         </Reveal>
       </div>

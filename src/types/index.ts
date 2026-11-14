@@ -18,7 +18,8 @@ export interface Tenant {
   tax_number?: string;
   currency: string;
   is_active: boolean;
-  subscription_status: 'active' | 'trial' | 'past_due' | 'suspended';
+  subscription_status: 'active' | 'trial' | 'past_due' | 'suspended' | 'expired';
+  subscription_expires_at?: string | null;
   created_at: string;
 }
 

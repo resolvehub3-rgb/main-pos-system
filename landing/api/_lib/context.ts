@@ -17,7 +17,7 @@
 import type {CommerceConfig} from './env.ts';
 import {PRODUCT_CODE} from './entitlement.ts';
 import type {EventKeys, ProviderEvent, ReduceContext} from './event-reducer.ts';
-import {selectRows} from './supabase.ts';
+import {commerceTable, selectRows} from './supabase.ts';
 
 /** Row shapes (snake_case) as returned by PostgREST. */
 export interface OrderRow {
@@ -81,7 +81,7 @@ export async function loadOrder(
 ): Promise<OrderRow | null> {
   const rows = await selectRows<OrderRow>(
     config,
-    'orders',
+    commerceTable(config, 'orders'),
     `reference=eq.${eq(reference)}&select=${ORDER_COLUMNS}&limit=1`,
   );
   return rows[0] ?? null;
@@ -94,7 +94,7 @@ export async function loadEntitlementForUser(
 ): Promise<EntitlementRowFull | null> {
   const rows = await selectRows<EntitlementRowFull>(
     config,
-    'entitlements',
+    commerceTable(config, 'entitlements'),
     `user_id=eq.${eq(userId)}&product_code=eq.${eq(productCode)}&select=${ENTITLEMENT_COLUMNS}&order=valid_to.desc&limit=1`,
   );
   return rows[0] ?? null;
@@ -108,7 +108,7 @@ export async function loadEntitlementsForUser(
 ): Promise<EntitlementRowFull[]> {
   return selectRows<EntitlementRowFull>(
     config,
-    'entitlements',
+    commerceTable(config, 'entitlements'),
     `user_id=eq.${eq(userId)}&product_code=eq.${eq(productCode)}&select=${ENTITLEMENT_COLUMNS}&order=valid_to.desc`,
   );
 }
@@ -120,7 +120,7 @@ export async function loadSubscriptionForUser(
 ): Promise<SubscriptionRowFull | null> {
   const rows = await selectRows<SubscriptionRowFull>(
     config,
-    'subscriptions',
+    commerceTable(config, 'subscriptions'),
     `user_id=eq.${eq(userId)}&select=${SUBSCRIPTION_COLUMNS}&order=created_at.desc&limit=1`,
   );
   return rows[0] ?? null;
@@ -129,7 +129,7 @@ export async function loadSubscriptionForUser(
 export async function loadPlan(config: CommerceConfig, planCode: string): Promise<PlanRowFull | null> {
   const rows = await selectRows<PlanRowFull>(
     config,
-    'plans',
+    commerceTable(config, 'plans'),
     `code=eq.${eq(planCode)}&select=code,interval_months,entitlement_product&limit=1`,
   );
   return rows[0] ?? null;
@@ -165,7 +165,7 @@ export async function loadReduceContext(
     keys.subscriptionCode !== null
       ? selectRows<SubscriptionRowFull>(
           config,
-          'subscriptions',
+          commerceTable(config, 'subscriptions'),
           `paystack_subscription_code=eq.${eq(keys.subscriptionCode)}&select=${SUBSCRIPTION_COLUMNS}&limit=1`,
         ).then((rows) => rows[0] ?? null)
       : Promise.resolve(null),

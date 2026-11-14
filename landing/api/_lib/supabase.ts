@@ -28,6 +28,23 @@ export class BackendError extends Error {
 
 const TABLE_RE = /^[a-z_][a-z0-9_]*$/;
 
+export type CommerceTableName =
+  | 'plans'
+  | 'orders'
+  | 'entitlements'
+  | 'subscriptions'
+  | 'webhook_events'
+  | 'audit_logs';
+
+export function commerceTable(cfg: CommerceConfig, name: CommerceTableName): string {
+  const prefix = cfg.tablePrefix ?? '';
+  const resolved = `${prefix}${name}`;
+  if (!TABLE_RE.test(resolved)) {
+    throw new BackendError(`unsafe table name: ${resolved}`, 500);
+  }
+  return resolved;
+}
+
 interface CallOptions {
   method: string;
   url: string;

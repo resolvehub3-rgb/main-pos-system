@@ -1,45 +1,41 @@
 import {Reveal} from './Reveal';
 
-function buildFaqs(): Array<{q: string; a: string}> {
-  return [
+const FAQS: Array<{q: string; a: string}> = [
   {
     q: 'What is SamTill?',
     a: 'SamTill is a point-of-sale and retail management application by SamTeck Digital for supermarkets and shops in Ghana. It covers barcode checkout, product and category management, stock movement records, receipt printing, sales reporting and a customer-facing display.',
   },
   {
-    q: 'How much does SamTill cost?',
-    a: 'SamTill is offered in three proposed packages — Starter, Business and Professional — with one-time licences for one computer. These prices are still a draft awaiting final approval by SamTeck Digital, so please enquire to confirm the current price before making any decision.',
+    q: 'How much does SamTill POS cost?',
+    a: 'SamTill POS is offered under one clear 6-Month Subscription plan at GH₵500.00 as a single upfront payment. Everything is included — barcode POS, inventory Stock Book, receipt printing, staff accounts, and reports.',
   },
   {
-    q: 'Is the licence a subscription?',
-    a: 'Each package is proposed as a one-time licence for one computer, including the first six months of maintenance and support. Permanent use applies to the licensed version. Maintenance, support and updates after that initial period may require renewal under the final terms approved by SamTeck Digital.',
+    q: 'Is there automatic recurring billing?',
+    a: 'No. Your GH₵500.00 payment is a single upfront payment covering 6 calendar months from activation. Nothing is deducted automatically after 6 months — you choose when to renew manually.',
   },
   {
-    q: 'Do I pay online?',
-    a: 'No. Online payment is not available yet. You enquire first, agree the package and terms with SamTeck Digital directly, and payment is arranged between you and the business.',
+    q: 'How do I pay and activate my shop?',
+    a: 'Click PAY NOW on the Pricing page, sign in or create your SamTill customer account, and complete checkout securely with Paystack (Mobile Money or card). Once verified, your 6-month subscription activates immediately and you can open SamTill POS.',
   },
   {
-    q: 'Can I install it myself?',
-    a: 'Yes — SamTill runs in the browser and installs as an app: open the SamTill web app, then use your browser’s Install app (or Add to Home Screen) feature to keep it on your device. SamTeck Digital can still help with setup in your shop.',
+    q: 'Can I install SamTill as an app?',
+    a: 'Yes. SamTill runs as an installable Progressive Web App (PWA). Use the Install SamTill button in the navigation bar or visit Download for step-by-step instructions on Chrome, Microsoft Edge, Android, and iPhone/iPad.',
   },
   {
     q: 'What hardware do I need?',
-    a: 'SamTill runs on one computer per licence. Receipt printing uses a standard thermal receipt printer, and barcode scanning uses a standard USB barcode scanner. SamTeck Digital will confirm the exact setup for your shop during enrolment.',
+    a: 'SamTill runs on Windows, Mac, tablet, or mobile browsers. For the checkout counter, it works with standard USB barcode scanners and thermal receipt printers (including Windows USB print bridge support).',
   },
   {
     q: 'Does it work for multiple staff?',
-    a: 'Yes. SamTill has staff accounts with different roles — for example a shop-owner view and a cashier till — so the owner sees reports and settings while cashiers work at the point of sale.',
+    a: 'Yes. Shop owners get full analytics and inventory management, while cashiers sign into their fast till terminal using staff PIN codes.',
   },
   {
     q: 'What happens to my business data?',
-    a: 'Your shop data belongs to you. Details of how data is stored and backed up for your installation are confirmed in writing during setup, before you activate a licence.',
+    a: 'Your shop inventory, sales, and customer records live in your isolated multi-tenant workspace backed by PostgreSQL Row-Level Security and real-time cloud sync.',
   },
-  ];
-}
+];
 
 export default function Faq() {
-  const faqs = buildFaqs();
-
   return (
     <section id="faq" className="bg-navy-950 py-20 lg:py-28">
       <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
@@ -48,12 +44,12 @@ export default function Faq() {
             Frequently asked questions
           </p>
           <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
-            Answers before you enquire
+            Answers before you get started
           </h2>
         </Reveal>
 
         <div className="mt-10 grid grid-cols-1 gap-3 md:grid-cols-2">
-          {faqs.map((item, index) => (
+          {FAQS.map((item, index) => (
             <Reveal key={item.q} delayMs={index * 50}>
               <details className="group h-full rounded-xl border border-navy-700 bg-navy-900/60 transition-colors open:border-amber-500/50">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-base font-semibold text-white [&::-webkit-details-marker]:hidden">

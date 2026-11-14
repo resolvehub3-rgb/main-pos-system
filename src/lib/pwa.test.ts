@@ -1,17 +1,11 @@
 import {strict as assert} from 'node:assert';
 import {test} from 'node:test';
-import {applyStandaloneTitle, isStandalone} from './pwa.ts';
-
-/**
- * PWA window-title tests.
- *
- * The installed PWA's title bar renders `document.title`, which is the long
- * SEO <title> from index.html. applyStandaloneTitle() swaps it for the short
- * app name — but ONLY when actually running installed, so a normal browser
- * tab (and its SEO title) is never touched. These tests run in Node (no real
- * window/document), so the browser globals are stubbed per test and restored
- * afterwards.
- */
+import {
+  applyStandaloneTitle,
+  detectInstallPlatform,
+  isStandalone,
+  resolveInstallState,
+} from './pwa.ts';
 
 interface StubGlobals {
   restore(): void;
@@ -26,8 +20,6 @@ function stubWindow(matched: boolean): StubGlobals {
 
   g.window = {
     matchMedia: (query: string) => ({matches: matched && query.includes('standalone')}),
-    // isStandalone() reads window.navigator.standalone as a fallback — the
-    // stub must not blow up when matchMedia does not match.
     navigator: {},
   };
   g.document = {title: 'SamTill — Supermarket & Retail POS for Ghana | SamTeck Digital'};
@@ -85,6 +77,60 @@ test('applyStandaloneTitle shortens the title in the installed window', () => {
 });
 
 test('applyStandaloneTitle is a no-op without a document (SSR / Node)', () => {
-  // No globals stubbed — must not throw.
   assert.doesNotThrow(() => applyStandaloneTitle());
+});
+
+test('resolveInstallState selects installed, installable, or unsupported honestly', () => {
+  assert.equal(
+    resolveInstallState({
+      standalone: true,
+      relatedInstalled: false,
+      appInstalledRecorded: false,
+      hasPromptEvent: false,
+    }),
+    'installed',
+  );
+  assert.equal(
+    resolveInstallState({
+      standalone: false,
+      relatedInstalled: true,
+      appInstalledRecorded: false,
+      hasPromptEvent: false,
+    }),
+    'installed',
+  );
+  assert.equal(
+    resolveInstallState({
+      standalone: false,
+      relatedInstalled: false,
+      appInstalledRecorded: true,
+      hasPromptEvent: false,
+    }),
+    'installed',
+  );
+  assert.equal(
+    resolveInstallState({
+      standalone: false,
+      relatedInstalled: false,
+      appInstalledRecorded: false,
+      hasPromptEvent: true,
+    }),
+    'installable',
+  );
+  assert.equal(
+    resolveInstallState({
+      standalone: false,
+      relatedInstalled: false,
+      appInstalledRecorded: false,
+      hasPromptEvent: false,
+    }),
+    'unsupported',
+  );
+});
+
+test('detectInstallPlatform identifies iOS, Android, Edge, and Chrome Windows', () => {
+  assert.equal(detectInstallPlatform('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)'), 'safari-ios');
+  assert.equal(detectInstallPlatform('Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/120.0'), 'chrome-android');
+  assert.equal(detectInstallPlatform('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/121.0'), 'edge-windows');
+  assert.equal(detectInstallPlatform('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0'), 'chrome-windows');
 });

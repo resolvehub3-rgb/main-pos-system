@@ -50,15 +50,13 @@ export function buildWhatsAppLink(body: string): string {
   return `https://wa.me/${number}?text=${encodeURIComponent(body)}`;
 }
 
-/** The default enquiry text the visitor can edit before sending. */
 export const DEFAULT_ENQUIRY = [
   'Hello SamTeck Digital,',
   '',
-  'I would like to enquire about SamTill for my shop.',
+  'I would like to enquire about the SamTill POS 6-Month Subscription (GH₵500.00) for my shop.',
   '',
   'Shop type:',
   'Location:',
-  'Preferred package (Starter / Business / Professional):',
   'Best number to reach me on:',
   '',
   'Thank you.',

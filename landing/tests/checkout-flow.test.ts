@@ -47,7 +47,7 @@ import {
   nextRouteAfterSignIn,
   parseRoute,
 } from '../src/lib/hashRoute.ts';
-import {COMPARISON_ROWS, LICENCE_TERMS, PACKAGES, PRICING_APPROVED} from '../src/config/pricing.ts';
+import {LICENCE_TERMS, PACKAGES, PRICING_APPROVED, SAMTILL_PLAN} from '../src/config/pricing.ts';
 import {COMMERCE} from '../src/config/commerce.ts';
 
 const API = 'https://api.example.com';
@@ -531,58 +531,42 @@ test('display: every checkout failure kind has a customer-readable message', () 
 });
 
 // ---------------------------------------------------------------------------
-// Approved commercial copy (Phase 0)
+// Approved commercial copy (Single 6-Month Subscription Model)
 // ---------------------------------------------------------------------------
 
-test('commercial: pricing is approved and the one-time tiers are the ones on file', () => {
+test('commercial: pricing is approved and uses the single GH₵500.00 / 6-month plan', () => {
   assertEqual(PRICING_APPROVED, true, 'PRICING_APPROVED is true');
-  assertEqual(
-    PACKAGES.map((pkg) => pkg.price),
-    [499, 899, 1499],
-    'approved prices',
-  );
-  assert(PACKAGES.every((pkg) => pkg.licenceType === 'One-time licence'), 'one-time only');
-  assert(PACKAGES.every((pkg) => pkg.licenceSeats === '1 computer'), 'one computer each');
-  assert(PACKAGES.every((pkg) => !pkg.draftTierFeatures), 'no draft feature notices');
-  assertEqual(new Set(PACKAGES.map((pkg) => pkg.id)).size, PACKAGES.length, 'package ids unique (they are plan codes)');
+  assertEqual(PACKAGES.length, 1, 'exactly one subscription package');
+  assertEqual(SAMTILL_PLAN.id, 'samtill-6m');
+  assertEqual(SAMTILL_PLAN.price, 500);
+  assertEqual(SAMTILL_PLAN.amountMinor, 50000);
+  assertEqual(SAMTILL_PLAN.intervalMonths, 6);
+  assertEqual(SAMTILL_PLAN.paymentType, 'Single upfront payment');
+  assertEqual(SAMTILL_PLAN.durationLabel, '6 Months');
 });
 
-test('commercial: no "to be confirmed" rows remain in the comparison table', () => {
-  assertEqual(COMPARISON_ROWS.length > 0, true, 'comparison rows exist');
-  assert(COMPARISON_ROWS.every((row) => !row.ownerReview), 'every row is confirmed');
-  assert(
-    COMPARISON_ROWS.every((row) => row.values.every((value) => !value.includes('To be confirmed'))),
-    'no placeholder values',
-  );
-});
-
-test('commercial: licence terms no longer promise that terms are coming', () => {
-  assert(!LICENCE_TERMS.renewalNote.includes('finalised'), 'renewal note is final');
-  assert(!LICENCE_TERMS.renewalNote.includes('before launch'), 'no "before launch" wording');
-  assert(LICENCE_TERMS.renewalNote.includes('does not stop working'), 'states the customer guarantee');
+test('commercial: subscription terms specify 6-month single upfront access', () => {
+  assert(LICENCE_TERMS.summary.includes('GH₵500.00'), 'summary cites exact GH₵500.00 price');
+  assert(LICENCE_TERMS.renewalNote.includes('extend cleanly'), 'explains clean early renewal stacking');
   assertEqual(LICENCE_TERMS.includedSupportMonths, 6, 'six months included');
 });
 
-test('commercial: the payment switch is still off until the backend exists', () => {
-  assertEqual(COMMERCE.paymentsEnabled, false, 'paymentsEnabled ships false');
-  assertEqual(COMMERCE.accountEnabled, true, 'accountEnabled ships true (approval-gated)');
+test('commercial: customer accounts and online payments are enabled', () => {
+  assertEqual(COMMERCE.paymentsEnabled, true, 'paymentsEnabled is true');
+  assertEqual(COMMERCE.accountEnabled, true, 'accountEnabled is true');
 });
 
 test('sql: no invalid privileges are granted or revoked on a sequence', () => {
-  // Postgres sequences accept ONLY USAGE and SELECT. Naming INSERT/UPDATE/
-  // DELETE/TRUNCATE on a sequence aborts the whole migration (invalid
-  // privilege type INSERT for sequence) — which is exactly how the commerce
-  // migration died on its first run, leaving public.plans missing.
   const INVALID_SEQUENCE_PRIVILEGE = /\b(insert|update|delete|truncate|references|trigger)\b[^;\n]*\bon[^;\n]*\bsequences?\b/i;
 
   const files = [
     '../db/migrations/0001_commerce_init.sql',
     '../db/seeds/0001_approved_plans.sql',
+    '../../supabase/migrations/20261114000001_commerce_6m_subscription.sql',
   ];
 
   for (const file of files) {
     const raw = readFileSync(new URL(file, import.meta.url), 'utf8');
-    // Strip `--` comments so documentation about the rule is not flagged.
     const sql = raw
       .split('\n')
       .map((line) => line.replace(/--.*$/, ''))
@@ -616,31 +600,31 @@ test('sql: the seed can only run where the migration has created the tables', ()
   );
 });
 
-test('commercial: seeded plan amounts exactly match the approved package prices', () => {
-  // Guards the seed file against the classic pesewas slip (89900 vs 89000):
-  // the database is the only thing that decides what a customer is charged,
-  // so it must equal the website copy × 100, for every tier.
+test('commercial: seeded plan amounts match GH₵500.00 (50000 pesewas) for 6 months', () => {
   const sql = readFileSync(new URL('../db/seeds/0001_approved_plans.sql', import.meta.url), 'utf8');
+  const unifiedSql = readFileSync(
+    new URL('../../supabase/migrations/20261114000001_commerce_6m_subscription.sql', import.meta.url),
+    'utf8',
+  );
 
   for (const pkg of PACKAGES) {
     const rowPattern = new RegExp(`'${pkg.id}'[\\s\\S]*?\\n\\s*(\\d{4,6}),\\n\\s*'GHS'`);
     const match = sql.match(rowPattern);
     assert(match, `seed has a row for ${pkg.id}`);
-    assertEqual(
-      Number(match[1]),
-      pkg.price * 100,
-      `${pkg.id} is seeded in pesewas (price × 100)`,
-    );
+    assertEqual(Number(match[1]), pkg.price * 100, `${pkg.id} is seeded in pesewas (price × 100)`);
   }
 
   assertEqual(
     (sql.match(/'GHS',\n    'one_time',\n    6,/g) ?? []).length,
     PACKAGES.length,
-    'every seeded plan is a one-time licence granting 6 months of access',
+    'every seeded plan is a one-time payment granting 6 months of access',
   );
   assertEqual(
     (sql.match(/'samtill-pos',\n    null,\n    true/g) ?? []).length,
     PACKAGES.length,
     'every seeded plan is active with no auto-renewal plan code',
   );
+
+  assert(unifiedSql.includes("'samtill-6m'"), 'unified migration seeds samtill-6m');
+  assert(unifiedSql.includes('50000'), 'unified migration seeds 50000 pesewas');
 });

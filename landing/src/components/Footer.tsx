@@ -1,15 +1,9 @@
-import {CONTACT, CONTACT_PENDING} from '../config/contact';
-import {COMMERCE} from '../config/commerce';
+import {CONTACT} from '../config/contact';
 import {FOOTER_LINKS, NAV_LINKS, SITE} from '../config/site';
-import {accountAvailability} from '../lib/availability';
-import {readCommerceEnv} from '../lib/commerceClient';
+import {navigateRoute} from '../lib/navigation';
 
 export default function Footer() {
   const year = new Date().getFullYear();
-
-  // Mirror the availability the site actually has: the footer must never
-  // claim "no registrations" once those screens are switched on.
-  const selfServiceOpen = accountAvailability(COMMERCE, readCommerceEnv()).available;
 
   return (
     <footer className="border-t border-navy-800 bg-navy-950">
@@ -33,6 +27,14 @@ export default function Footer() {
               Point-of-sale and retail management for Ghanaian supermarkets and shops — barcode
               checkout, stock records, receipts and sales reports.
             </p>
+            <div className="mt-5">
+              <a
+                href={SITE.loginUrl}
+                className="inline-flex items-center rounded-full bg-amber-700 px-5 py-2 text-xs font-bold text-white transition-colors hover:bg-amber-800"
+              >
+                POS Login →
+              </a>
+            </div>
           </div>
 
           <nav aria-label="Footer">
@@ -42,6 +44,10 @@ export default function Footer() {
                 <li key={link.href}>
                   <a
                     href={link.href}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      navigateRoute(link.href);
+                    }}
                     className="text-sm text-navy-300 transition-colors hover:text-amber-400"
                   >
                     {link.label}
@@ -64,6 +70,19 @@ export default function Footer() {
                 <li key={link.href}>
                   <a
                     href={link.href}
+                    onClick={
+                      link.href.startsWith('/') && !link.href.endsWith('.html')
+                        ? (event) => {
+                            event.preventDefault();
+                            navigateRoute(link.href);
+                          }
+                        : link.href.startsWith('#/')
+                          ? (event) => {
+                              event.preventDefault();
+                              navigateRoute(link.href);
+                            }
+                          : undefined
+                    }
                     className="text-sm font-semibold text-navy-200 underline decoration-navy-600 underline-offset-4 transition-colors hover:text-amber-400 hover:decoration-amber-400"
                   >
                     {link.label}
@@ -79,15 +98,6 @@ export default function Footer() {
             © {year} {SITE.company}. {SITE.brand} is a product of {SITE.company}. All rights
             reserved.
           </p>
-          {CONTACT_PENDING && (
-            <p className="mt-2 text-xs font-medium text-amber-400/90">
-              Preview site — contact details, prices and policies are draft and awaiting owner
-              confirmation.{' '}
-              {selfServiceOpen
-                ? 'Online payments are not offered on this site.'
-                : 'No online payments or registrations are offered on this site.'}
-            </p>
-          )}
         </div>
       </div>
     </footer>

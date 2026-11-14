@@ -5,13 +5,8 @@ import {
   buildMailtoLink,
   buildWhatsAppLink,
 } from '../config/contact';
+import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
 import {Reveal} from './Reveal';
-import {createClient} from '@supabase/supabase-js';
-
-const posSupabase = createClient(
-  'https://ohqatznpnvoqrsjpxwgt.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ocWF0em5wbnZvcXJzanB4d2d0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMyNjQ0ODIsImV4cCI6MjEwODg0MDQ4Mn0.j0whwl9fNioaT27unLyNoBBi9cw9iZDkp3lr7DnYoDA',
-);
 
 export default function Contact() {
   const [message, setMessage] = useState('');
@@ -29,23 +24,57 @@ export default function Contact() {
   async function sendEnquiry() {
     setStatus('sending');
     setErrorText('');
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const trimmedMessage = message.trim();
+
     try {
-      const {error} = await posSupabase.from('contact_enquiries').insert({
-        name: name.trim() || null,
-        email: email.trim() || null,
-        message: message.trim(),
+      const apiBase = readCommerceEnv().apiBase;
+      const response = await fetch(`${apiBase}/api/contact`, {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({
+          name: trimmedName,
+          email: trimmedEmail,
+          message: trimmedMessage,
+        }),
       });
-      if (error) {
-        // Backend table not available yet — deliver in real time via the
-        // visitor's own email app instead, so the enquiry still arrives.
-        if (mailReady) window.location.href = buildMailtoLink(subject, body);
+      if (response.ok) {
+        setName('');
+        setEmail('');
+        setMessage('');
         setStatus('success');
-      } else {
-        setStatus('success');
+        return;
       }
+
+      // Fallback directly to authenticated Supabase client if configured
+      const supabase = getCommerceAuth();
+      if (supabase) {
+        const {error} = await supabase.from('contact_enquiries').insert({
+          name: trimmedName || null,
+          email: trimmedEmail || null,
+          message: trimmedMessage,
+        });
+        if (!error) {
+          setName('');
+          setEmail('');
+          setMessage('');
+          setStatus('success');
+          return;
+        }
+      }
+
+      const payload = (await response.json().catch(() => null)) as {message?: string} | null;
+      setStatus('error');
+      setErrorText(
+        payload?.message ??
+          'We could not submit your enquiry online right now. Please use Send by email or Chat on WhatsApp below.',
+      );
     } catch {
-      if (mailReady) window.location.href = buildMailtoLink(subject, body);
-      setStatus('success');
+      setStatus('error');
+      setErrorText(
+        'Could not reach the server. Please use Send by email or Chat on WhatsApp below.',
+      );
     }
   }
 
@@ -59,8 +88,8 @@ export default function Contact() {
               Enquire about SamTill for your shop
             </h2>
             <p className="mt-4 text-lg leading-relaxed text-slate-600">
-              Write your message below. It opens in your own email or WhatsApp app — nothing is
-              collected or stored by this website.
+              Send your question directly to SamTeck Digital, or use the email or WhatsApp buttons
+              to reach our team immediately.
             </p>
 
             {CONTACT_PENDING && (
@@ -69,13 +98,7 @@ export default function Contact() {
                 className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm font-medium leading-relaxed text-amber-900"
               >
                 <strong className="font-bold">Contact details pending confirmation.</strong> SamTeck
-                Digital's verified phone number and email have not been provided yet, so the send
-                buttons stay disabled and no placeholder address is published. They activate
-                automatically once the real details are added to{' '}
-                <code className="rounded bg-amber-100 px-1.5 py-0.5 text-xs">
-                  src/config/contact.ts
-                </code>
-                .
+                Digital&apos;s verified phone number and email have not been provided yet.
               </div>
             )}
 
@@ -143,29 +166,29 @@ export default function Contact() {
                 onChange={(event) => setEmail(event.target.value)}
                 className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-navy-900 shadow-sm"
               />
-              <details className="mt-5 rounded-xl border border-slate-300 bg-white shadow-sm">
-                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-navy-900">
-                  Message (click to open)
-                </summary>
-                <textarea
-                  id="enquiry-message"
-                  value={message}
-                  onChange={(event) => setMessage(event.target.value)}
-                  rows={9}
-                  placeholder="Write your message here..."
-                  className="w-full resize-y rounded-b-xl border-t border-slate-300 bg-white px-4 py-3 text-sm leading-relaxed text-navy-900"
-                  aria-describedby="enquiry-note"
-                />
-              </details>
-              <p id="enquiry-note" className="mt-2 text-xs text-slate-500">
-                Edit anything here before sending. No information is sent from this page itself.
-              </p>
+
+              <label htmlFor="enquiry-message" className="mt-5 block text-sm font-semibold text-navy-900">
+                Message (required)
+              </label>
+              <textarea
+                id="enquiry-message"
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                rows={6}
+                placeholder="Write your message here..."
+                className="mt-2 w-full resize-y rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm leading-relaxed text-navy-900 shadow-sm"
+              />
 
               <div className="mt-6">
                 <button
                   type="button"
-                  disabled={status === 'sending' || name.trim() === '' || email.trim() === '' || message.trim() === ''}
-                  onClick={sendEnquiry}
+                  disabled={
+                    status === 'sending' ||
+                    name.trim() === '' ||
+                    email.trim() === '' ||
+                    message.trim() === ''
+                  }
+                  onClick={() => void sendEnquiry()}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-amber-700 px-6 py-3.5 text-sm font-bold text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
                 >
                   {status === 'sending' ? 'Sending…' : 'Send enquiry'}
@@ -226,7 +249,6 @@ export default function Contact() {
                   Chat on WhatsApp
                 </button>
               </div>
-
             </form>
           </Reveal>
         </div>

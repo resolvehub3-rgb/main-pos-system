@@ -475,6 +475,15 @@ test('deny reasons map to audit result values', () => {
 
 const PLANS: PlanRow[] = [
   {
+    code: 'samtill-6m',
+    name: '6-Month Subscription',
+    amount_minor: 50000,
+    currency: 'GHS',
+    interval_months: 6,
+    entitlement_product: 'samtill-pos',
+    active: true,
+  },
+  {
     code: 'starter',
     name: 'Starter',
     amount_minor: 49900,
@@ -495,10 +504,11 @@ const PLANS: PlanRow[] = [
 ];
 
 test('checkout resolves price from the server row, not the client', () => {
-  const resolution = resolveCheckoutPlan(PLANS, {planCode: 'starter'});
+  const resolution = resolveCheckoutPlan(PLANS, {planCode: 'samtill-6m'});
   assert(resolution.ok, 'expected resolution to succeed');
-  assertEqual(resolution.plan.amount_minor, 49900);
+  assertEqual(resolution.plan.amount_minor, 50000);
   assertEqual(resolution.plan.currency, 'GHS');
+  assertEqual(resolution.plan.interval_months, 6);
 });
 
 test('any client-supplied price field is rejected outright', () => {
@@ -536,9 +546,9 @@ test('missing plan code and non-object bodies are rejected', () => {
 test('toPublicPlan exposes only safe camelCase fields', () => {
   const publicPlan = toPublicPlan(PLANS[0]);
   assertEqual(publicPlan, {
-    code: 'starter',
-    name: 'Starter',
-    amountMinor: 49900,
+    code: 'samtill-6m',
+    name: '6-Month Subscription',
+    amountMinor: 50000,
     currency: 'GHS',
     intervalMonths: 6,
   });

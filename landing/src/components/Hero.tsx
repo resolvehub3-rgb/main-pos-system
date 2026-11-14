@@ -1,4 +1,7 @@
+import {SITE} from '../config/site';
+import {navigateRoute} from '../lib/navigation';
 import {Reveal} from './Reveal';
+import SmartInstallButton from './SmartInstallButton';
 
 export default function Hero() {
   return (
@@ -35,18 +38,23 @@ export default function Hero() {
           </Reveal>
 
           <Reveal delayMs={240}>
-            <div className="mt-9 flex flex-col gap-4 sm:flex-row">
+            <div className="mt-9 flex flex-wrap items-center gap-4">
               <a
-                href="#pricing"
+                href="/pricing"
+                onClick={(event) => {
+                  event.preventDefault();
+                  navigateRoute('/pricing');
+                }}
                 className="inline-flex items-center justify-center rounded-full bg-amber-700 px-8 py-4 text-base font-bold text-white shadow-lg shadow-amber-700/30 transition-colors hover:bg-amber-800"
               >
-                View packages
+                6-Month Plan — GH₵500.00
               </a>
+              <SmartInstallButton variant="hero" />
               <a
-                href="#contact"
-                className="inline-flex items-center justify-center rounded-full border-2 border-navy-500 px-8 py-4 text-base font-bold text-white transition-colors hover:border-amber-400 hover:text-amber-400"
+                href={SITE.loginUrl}
+                className="inline-flex items-center justify-center px-3 py-2 text-sm font-bold text-amber-300 underline decoration-amber-500/60 underline-offset-4 transition-colors hover:text-amber-200"
               >
-                Contact the business
+                Login to POS →
               </a>
             </div>
           </Reveal>
@@ -83,7 +91,9 @@ export default function Hero() {
                 <span className="h-3 w-3 rounded-full bg-amber-500/80" aria-hidden="true" />
                 <span className="h-3 w-3 rounded-full bg-navy-500" aria-hidden="true" />
                 <span className="h-3 w-3 rounded-full bg-navy-500" aria-hidden="true" />
-                <span className="ml-3 text-xs font-medium text-navy-300">SamTill — Shop Owner Dashboard</span>
+                <span className="ml-3 text-xs font-medium text-navy-300">
+                  SamTill — Shop Owner Dashboard
+                </span>
               </div>
               <img
                 src="/assets/screenshot-dashboard.png"

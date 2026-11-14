@@ -1,33 +1,39 @@
 /**
- * GET /api/status tests — the reviewer overview reports the payment gates as
- * disabled, echoes only variable NAMES of missing configuration, and no
- * longer exposes any installer-download access mode (SamTill is a browser
- * PWA; the installer-download layer was removed). No real network.
+ * GET /api/status tests — checks unified & standalone env config, default
+ * enabled flags for checkout/pricing, and explicit disable flags.
  */
 
 import {assert, assertEqual, test} from './harness.ts';
 import {GET as statusGet} from '../api/status.ts';
 
 const SUPABASE_URL = 'http://127.0.0.1:1';
-const JWT_SECRET = 'local-status-test-secret-0123456789';
-
-// A deliberately FAKE key, shaped only so the config loader's format check
-// accepts it. Assembled from parts so no key-shaped literal ever appears in
-// this file (secret scanners flag prefixed strings even when obviously fake).
 const FAKE_SERVICE_ROLE_KEY = ['sb', 'secret', 'local-test-key-0000000000000000'].join('_');
 
-const REQUIRED_ENV: Record<string, string> = {
-  SUPABASE_COMMERCE_URL: SUPABASE_URL,
-  SUPABASE_COMMERCE_SERVICE_ROLE_KEY: FAKE_SERVICE_ROLE_KEY,
-  SUPABASE_AUTH_JWT_SECRET: JWT_SECRET,
-  PAYSTACK_SECRET_KEY: 'sk_test_local',
-  APP_BASE_URL: 'http://localhost:4173',
-};
-
-/** Set the required env for the duration of the test, then restore it. */
-async function withEnv<T>(fn: () => Promise<T>): Promise<T> {
-  const saved = Object.keys(REQUIRED_ENV).map((name) => [name, process.env[name]] as const);
-  for (const [name, value] of Object.entries(REQUIRED_ENV)) process.env[name] = value;
+async function withCustomEnv<T>(envPatch: Record<string, string | undefined>, fn: () => Promise<T>): Promise<T> {
+  const keys = Array.from(
+    new Set([
+      ...Object.keys(envPatch),
+      'SUPABASE_COMMERCE_URL',
+      'SUPABASE_COMMERCE_SERVICE_ROLE_KEY',
+      'SUPABASE_URL',
+      'SUPABASE_SERVICE_ROLE_KEY',
+      'PAYSTACK_SECRET_KEY',
+      'APP_BASE_URL',
+      'CHECKOUT_ENABLED',
+      'PUBLISH_PRICES',
+      'ALLOW_LIVE_PAYMENTS',
+    ]),
+  );
+  const saved = keys.map((name) => [name, process.env[name]] as const);
+  for (const key of keys) {
+    if (key in envPatch) {
+      const value = envPatch[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    } else {
+      delete process.env[key];
+    }
+  }
   try {
     return await fn();
   } finally {
@@ -38,30 +44,54 @@ async function withEnv<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-test('status: payment gates are reported disabled and the backend is configured', async () => {
-  await withEnv(async () => {
-    const response = statusGet(new Request('http://localhost/api/status', {method: 'GET'}));
-    assertEqual(response.status, 200);
-    const body = (await response.json()) as {
-      flags: {checkoutEnabled: boolean; publishPrices: boolean; allowLivePayments: boolean};
-      backendConfigured: boolean;
-      endpoints: Array<{method: string; path: string}>;
-    };
-    assertEqual(body.flags.checkoutEnabled, false, 'CHECKOUT_ENABLED unset');
-    assertEqual(body.flags.publishPrices, false, 'PUBLISH_PRICES unset');
-    assertEqual(body.flags.allowLivePayments, false, 'ALLOW_LIVE_PAYMENTS unset');
-    assertEqual(body.backendConfigured, true);
-    assert(
-      !body.endpoints.some((endpoint) => endpoint.path.includes('download')),
-      'no download endpoint is advertised',
-    );
-  });
+test('status: unified Supabase env + Paystack key configures backend with active defaults', async () => {
+  await withCustomEnv(
+    {
+      SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY: FAKE_SERVICE_ROLE_KEY,
+      PAYSTACK_SECRET_KEY: 'sk_test_local',
+    },
+    async () => {
+      const response = statusGet(new Request('http://localhost:3000/api/status', {method: 'GET'}));
+      assertEqual(response.status, 200);
+      const body = (await response.json()) as {
+        flags: {checkoutEnabled: boolean; publishPrices: boolean; allowLivePayments: boolean};
+        backendConfigured: boolean;
+        databaseConfigured: boolean;
+        endpoints: Array<{method: string; path: string}>;
+      };
+      assertEqual(body.flags.checkoutEnabled, true, 'CHECKOUT_ENABLED defaults true');
+      assertEqual(body.flags.publishPrices, true, 'PUBLISH_PRICES defaults true');
+      assertEqual(body.flags.allowLivePayments, false, 'ALLOW_LIVE_PAYMENTS defaults false');
+      assertEqual(body.backendConfigured, true);
+      assertEqual(body.databaseConfigured, true);
+      assert(body.endpoints.some((endpoint) => endpoint.path === '/api/contact'), 'contact endpoint advertised');
+    },
+  );
 });
 
-test('status: the installer-download access mode is no longer exposed', async () => {
-  await withEnv(async () => {
-    const response = statusGet(new Request('http://localhost/api/status', {method: 'GET'}));
-    const body = (await response.json()) as Record<string, unknown>;
-    assert(!('downloadAccessMode' in body), 'downloadAccessMode field removed');
-  });
+test('status: database can be configured without Paystack secret and explicit disable flags are respected', async () => {
+  await withCustomEnv(
+    {
+      SUPABASE_COMMERCE_URL: SUPABASE_URL,
+      SUPABASE_COMMERCE_SERVICE_ROLE_KEY: FAKE_SERVICE_ROLE_KEY,
+      CHECKOUT_ENABLED: 'false',
+      PUBLISH_PRICES: 'false',
+    },
+    async () => {
+      const response = statusGet(new Request('http://localhost:3000/api/status', {method: 'GET'}));
+      const body = (await response.json()) as {
+        flags: {checkoutEnabled: boolean; publishPrices: boolean};
+        backendConfigured: boolean;
+        databaseConfigured: boolean;
+        missing: string[];
+      };
+      assertEqual(body.databaseConfigured, true);
+      assertEqual(body.backendConfigured, false);
+      assert(body.missing.includes('PAYSTACK_SECRET_KEY'), 'missing Paystack key reported');
+      assertEqual(body.flags.checkoutEnabled, false);
+      assertEqual(body.flags.publishPrices, false);
+      assert(!('downloadAccessMode' in body), 'downloadAccessMode field removed');
+    },
+  );
 });

@@ -1,27 +1,27 @@
-/** Site-wide copy. Edit here to change wording across the whole website. */
+/** Site-wide copy and navigation routes. */
 
 export const SITE = {
   brand: 'SamTill',
   company: 'SamTeck Digital',
   tagline: 'Supermarket & retail point of sale',
   logoSrc: '/assets/logo.png',
-  /**
-   * Public URL of the deployed SamTill web/PWA application.
-   * Leave '' until the owner confirms the address — nothing is linked or
-   * claimed while it is empty.
-   */
-  webAppUrl: '',
-  /** Set true once the site is approved for public launch. */
-  siteApprovedForLaunch: false,
+  /** Public URL path of the SamTill POS PWA application. */
+  webAppUrl: '/app/',
+  loginUrl: '/app/login',
+  siteApprovedForLaunch: true,
 } as const;
 
 export const NAV_LINKS = [
-  {label: 'Features', href: '#features'},
-  {label: 'FAQ', href: '#faq'},
-  {label: 'Contact', href: '#contact'},
+  {label: 'Home', href: '/'},
+  {label: 'Features', href: '/features'},
+  {label: 'Pricing', href: '/pricing'},
+  {label: 'About', href: '/about'},
+  {label: 'Contact', href: '/contact'},
 ] as const;
 
 export const FOOTER_LINKS = [
+  {label: 'Install & Download', href: '/download'},
+  {label: 'Customer Billing', href: '#/account'},
   {label: 'Privacy Policy', href: '/privacy.html'},
   {label: 'Terms of Service', href: '/terms.html'},
 ] as const;

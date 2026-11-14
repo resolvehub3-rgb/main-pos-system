@@ -1,17 +1,17 @@
-import {useState, type ChangeEvent, type FormEvent} from 'react';
-import StatusBanner, {type BannerTone} from '../components/account/StatusBanner';
+import {useEffect, useState, type ChangeEvent, type FormEvent} from 'react';
 import AccountShell from '../components/account/AccountShell';
 import GateNotice from '../components/account/GateNotice';
+import StatusBanner, {type BannerTone} from '../components/account/StatusBanner';
 import TextField from '../components/account/TextField';
 import {COMMERCE} from '../config/commerce';
 import {accountAvailability} from '../lib/availability';
-import {
-  registerAccount,
-  type RegisterOutcome,
-} from '../lib/authFlow';
+import {registerAccount, type RegisterOutcome} from '../lib/authFlow';
 import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
-import {navigateTo} from '../lib/navigation';
+import {nextRouteAfterSignIn} from '../lib/hashRoute';
+import {loginHref, navigateTo} from '../lib/navigation';
 import {createAuthProvider} from '../lib/supabaseAdapter';
+import {useAccountSession} from '../lib/useAccountSession';
+import {useHashRoute} from '../lib/useHashRoute';
 import {
   hasErrors,
   validateRegistration,
@@ -19,28 +19,25 @@ import {
   type RegistrationInput,
 } from '../lib/validation';
 
-/**
- * Customer registration.
- *
- * Only the fields the commerce account model stores are collected: email,
- * password, full name, optional phone. A website account is NOT a POS shop,
- * tenant or licence — the page says so plainly.
- *
- * Outcomes (src/lib/authFlow.ts):
- * - `pending_verification` → "check your email" (the address is NOT yet
- *   claimed to be verified),
- * - `signed_in`            → provider did not require confirmation,
- * - `duplicate_email`      → clear guidance to sign in / reset instead.
- */
-
 const EMPTY: RegistrationInput = {email: '', password: '', fullName: '', phone: ''};
 
 export default function RegisterPage() {
   const availability = accountAvailability(COMMERCE, readCommerceEnv());
+  const route = useHashRoute();
+  const {loading, account} = useAccountSession();
   const [values, setValues] = useState<RegistrationInput>(EMPTY);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [banner, setBanner] = useState<{tone: BannerTone; message: string} | null>(null);
+
+  const nextParam = route.params.get('next');
+  const nextRoute = nextRouteAfterSignIn(route.params);
+
+  useEffect(() => {
+    if (!loading && account) {
+      navigateTo(nextRoute);
+    }
+  }, [loading, account, nextRoute]);
 
   if (!availability.available) {
     return (
@@ -78,10 +75,14 @@ export default function RegisterPage() {
     setErrors({});
     setSubmitting(true);
 
+    const verifyUrl = nextParam
+      ? `${window.location.origin}/#/verify?next=${encodeURIComponent(nextParam)}`
+      : `${window.location.origin}/#/verify`;
+
     const result: RegisterOutcome = await registerAccount(
       createAuthProvider(client),
       values,
-      {emailRedirectTo: `${window.location.origin}/#/verify`},
+      {emailRedirectTo: verifyUrl},
     );
     setSubmitting(false);
 
@@ -93,12 +94,12 @@ export default function RegisterPage() {
         setValues(EMPTY);
         setBanner({
           tone: 'info',
-          message: `${result.message} After you verify your email and sign in, your account will be reviewed and you will be emailed as soon as it is approved.`,
+          message: `${result.message} After confirming your email, you can continue straight to checkout.`,
         });
         return;
       case 'signed_in':
         setBanner({tone: 'success', message: result.message});
-        window.setTimeout(() => navigateTo('/account'), 600);
+        window.setTimeout(() => navigateTo(nextRoute), 500);
         return;
       case 'duplicate_email':
         setBanner({tone: 'info', message: result.message});
@@ -112,11 +113,14 @@ export default function RegisterPage() {
   return (
     <AccountShell
       title="Create your SamTill account"
-      subtitle="Register to manage your SamTill account and licence. We only ask for what the account needs."
+      subtitle="Register to manage your SamTill POS 6-Month Subscription and billing."
       footer={
         <p>
           Already registered?{' '}
-          <a href="#/login" className="font-bold text-amber-700 underline-offset-4 hover:underline">
+          <a
+            href={nextParam === 'checkout' ? loginHref('/checkout') : '#/login'}
+            className="font-bold text-amber-700 underline-offset-4 hover:underline"
+          >
             Sign in →
           </a>
         </p>
@@ -175,10 +179,9 @@ export default function RegisterPage() {
         </button>
 
         <p className="mt-4 text-xs leading-relaxed text-slate-500">
-          Creating an account does not activate a SamTill POS licence and does not start any
-          payment. New accounts are reviewed and approved by SamTeck Digital before they can be
-          used. Passwords are sent securely to the SamTill account service and are never shown on
-          this website.
+          Creating an account does not charge your card or mobile money wallet. Once signed in,
+          you can activate your 6-Month Subscription (GH₵500.00) or access your existing billing
+          status.
         </p>
       </form>
     </AccountShell>

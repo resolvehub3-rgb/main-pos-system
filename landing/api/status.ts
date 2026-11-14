@@ -8,7 +8,7 @@
  * deployment is inert until the owner provisions the commerce backend.
  */
 
-import {getCommerceConfig, readFlag} from './_lib/env.ts';
+import {getCommerceConfig, getDatabaseConfig, readFlag} from './_lib/env.ts';
 import {json, methodGuard} from './_lib/http.ts';
 
 const ENDPOINTS: Array<{method: string; path: string; status: string}> = [
@@ -19,26 +19,29 @@ const ENDPOINTS: Array<{method: string; path: string; status: string}> = [
   {method: 'POST', path: '/api/webhooks/paystack', status: 'implemented_requires_backend_and_approval'},
   {method: 'GET', path: '/api/subscription', status: 'implemented_requires_backend'},
   {method: 'POST', path: '/api/subscription', status: 'skeleton_not_implemented'},
+  {method: 'POST', path: '/api/contact', status: 'implemented_requires_backend'},
 ];
 
 export function GET(request: Request): Response {
   const guard = methodGuard(request, 'GET');
   if (guard) return guard;
 
-  const configResult = getCommerceConfig();
+  const configResult = getCommerceConfig(request);
+  const dbResult = getDatabaseConfig(request);
 
   return json({
     service: 'samtill-commerce',
-    phase: 'preparation_only',
+    phase: configResult.ok ? 'active' : 'needs_configuration',
     description:
-      'SamTill customer commerce API. Every endpoint fails closed (503) until the dedicated commerce backend is provisioned and approved.',
+      'SamTill customer commerce API for 6-Month Subscription checkout, payment verification, and account access.',
     backendConfigured: configResult.ok,
+    databaseConfigured: dbResult.ok,
     missing: configResult.ok ? [] : configResult.missing,
     invalid: configResult.ok ? [] : configResult.invalid,
     flags: {
-      checkoutEnabled: readFlag('CHECKOUT_ENABLED'),
-      publishPrices: readFlag('PUBLISH_PRICES'),
-      allowLivePayments: readFlag('ALLOW_LIVE_PAYMENTS'),
+      checkoutEnabled: configResult.ok ? configResult.config.checkoutEnabled : readFlag('CHECKOUT_ENABLED', true),
+      publishPrices: configResult.ok ? configResult.config.publishPrices : readFlag('PUBLISH_PRICES', true),
+      allowLivePayments: readFlag('ALLOW_LIVE_PAYMENTS', false),
     },
     endpoints: ENDPOINTS,
     documentation: [

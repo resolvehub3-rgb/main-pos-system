@@ -14,10 +14,10 @@
  *  - `cache-control: no-store`.
  */
 
-import {getCommerceConfig} from './_lib/env.ts';
+import {getDatabaseConfig} from './_lib/env.ts';
 import {apiError, json, methodGuard, notConfigured} from './_lib/http.ts';
 import {toPublicPlan, type PlanRow} from './_lib/plans.ts';
-import {selectRows} from './_lib/supabase.ts';
+import {commerceTable, selectRows} from './_lib/supabase.ts';
 
 const PLAN_COLUMNS = 'code,name,amount_minor,currency,interval_months,entitlement_product,active';
 
@@ -25,7 +25,7 @@ export async function GET(request: Request): Promise<Response> {
   const guard = methodGuard(request, 'GET');
   if (guard) return guard;
 
-  const configResult = getCommerceConfig();
+  const configResult = getDatabaseConfig(request);
   if (!configResult.ok) return notConfigured(configResult.missing, configResult.invalid);
   const config = configResult.config;
 
@@ -38,7 +38,7 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const plans = await selectRows<PlanRow>(
       config,
-      'plans',
+      commerceTable(config, 'plans'),
       `select=${PLAN_COLUMNS}&active=eq.true&order=amount_minor.asc`,
     );
     return json({plans: plans.map(toPublicPlan)});

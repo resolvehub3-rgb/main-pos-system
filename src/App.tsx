@@ -12,7 +12,13 @@ import { SupabaseConfigModal } from './components/SupabaseConfigModal';
 import { AuthPage } from './components/AuthPage';
 import { OfflineBanner } from './components/OfflineBanner';
 import { db } from './lib/supabaseClient';
-import { syncAuthUrl } from './lib/roleRoute';
+import {
+  APP_POS_PATH,
+  APP_REGISTER_PATH,
+  normalizePosPathname,
+  sectionForShopOwnerPath,
+  syncAuthUrl,
+} from './lib/roleRoute';
 import { UserAccount, CartItem, Sale, Product, Tenant, CustomerDisplayPayment } from './types';
 import { calculateCartTotals } from './lib/money';
 import { buildCustomerDisplayState } from './lib/customerDisplay';
@@ -41,7 +47,11 @@ export default function App() {
   // Authentication & Current User Session
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => db.getCurrentUser());
   const [selectedShopId, setSelectedShopId] = useState<string>('tenant-accra-mall');
-  const [shopOwnerViewingPOS, setShopOwnerViewingPOS] = useState<boolean>(false);
+  const [shopOwnerViewingPOS, setShopOwnerViewingPOS] = useState<boolean>(() =>
+    typeof window !== 'undefined'
+      ? sectionForShopOwnerPath(window.location.pathname).viewingPOS
+      : false,
+  );
   const [, setTick] = useState<number>(0);
 
   // Modals state
@@ -518,10 +528,10 @@ export default function App() {
   // handleLogout → syncAuthUrl), so Register only appears for an explicit
   // /register deep link.
   if (!currentUser) {
+    const pathname =
+      typeof window !== 'undefined' ? normalizePosPathname(window.location.pathname) : '';
     const authTab: 'login' | 'register' =
-      typeof window !== 'undefined' && window.location.pathname === '/register'
-        ? 'register'
-        : 'login';
+      pathname === APP_REGISTER_PATH || pathname === '/register' ? 'register' : 'login';
     return (
       <AuthPage
         initialTab={authTab}
@@ -588,7 +598,12 @@ export default function App() {
             <span>Store Owner Till Testing Mode &bull; {currentTenant.name}</span>
           </div>
           <button
-            onClick={() => setShopOwnerViewingPOS(false)}
+            onClick={() => {
+              setShopOwnerViewingPOS(false);
+              if (typeof window !== 'undefined') {
+                window.history.replaceState({}, '', '/app/shop-owner');
+              }
+            }}
             className="flex items-center gap-1.5 px-3 py-1 bg-[#F28C28] hover:bg-orange-600 text-white rounded-lg transition font-bold"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
@@ -631,7 +646,12 @@ export default function App() {
               sales={sales}
               products={products}
               onOpenAddProduct={() => setShowAddProductModal(true)}
-              onOpenPOS={() => setShopOwnerViewingPOS(true)}
+              onOpenPOS={() => {
+                setShopOwnerViewingPOS(true);
+                if (typeof window !== 'undefined') {
+                  window.history.replaceState({}, '', APP_POS_PATH);
+                }
+              }}
               onOpenCustomerDisplay={openCustomerDisplay}
             />
           )

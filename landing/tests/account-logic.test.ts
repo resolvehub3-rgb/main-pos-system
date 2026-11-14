@@ -22,6 +22,7 @@ import {
 } from '../src/lib/authFlow.ts';
 import {
   isAccountRoute,
+  isMarketingRoute,
   nextRouteAfterSignIn,
   parseRoute,
   verificationParams,
@@ -168,22 +169,25 @@ test('gates: registration form appears only when switched on AND configured', ()
   assertEqual(result.reason, 'available');
 });
 
-test('gates: shipped commerce flags — accounts open (approval-gated), payments still off', () => {
-  assertEqual(COMMERCE.accountEnabled, true, 'accountEnabled ships true (approval-gated)');
-  assertEqual(COMMERCE.paymentsEnabled, false, 'paymentsEnabled ships false');
+test('gates: shipped commerce flags — accounts and checkout enabled', () => {
+  assertEqual(COMMERCE.accountEnabled, true, 'accountEnabled ships true');
+  assertEqual(COMMERCE.paymentsEnabled, true, 'paymentsEnabled ships true');
 });
 
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
 
-test('routing: account routes are recognised, section anchors are not', () => {
+test('routing: account and marketing routes are cleanly separated', () => {
   assertEqual(parseRoute('#/register', '').path, '/register');
   assertEqual(parseRoute('#/checkout?x=1', '').path, '/checkout');
   assertEqual(parseRoute('#features', '').path, '/', 'section anchor stays on the home page');
   assertEqual(parseRoute('', '').path, '/');
+  assertEqual(parseRoute('', '', '/pricing').path, '/pricing');
+  assertEqual(parseRoute('', '', '/download').path, '/download');
   assert(isAccountRoute('/register') && isAccountRoute('/checkout'), 'account routes known');
-  assert(!isAccountRoute('/') && !isAccountRoute('/download'), 'home and removed routes are not account routes');
+  assert(isMarketingRoute('/') && isMarketingRoute('/features') && isMarketingRoute('/pricing') && isMarketingRoute('/about') && isMarketingRoute('/contact') && isMarketingRoute('/download'), 'all marketing routes known');
+  assert(!isAccountRoute('/') && !isAccountRoute('/download'), 'home and download are marketing routes, not account routes');
 });
 
 test('routing: email-link parameters are read from the hash and the query string', () => {

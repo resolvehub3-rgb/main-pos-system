@@ -344,7 +344,12 @@ class DatabaseService {
   }
 
   public async initSupabaseClient(): Promise<boolean> {
-    if (!this.config.url || !this.config.anonKey) {
+    const isPlaceholder =
+      !this.config.url ||
+      !this.config.anonKey ||
+      this.config.url.includes('your-project.supabase.co') ||
+      this.config.anonKey.includes('your-anon-key');
+    if (isPlaceholder) {
       this.config.isConnected = false;
       this.config.statusMessage = 'Awaiting Supabase URL & Anon Key';
       this.supabaseClient = null;

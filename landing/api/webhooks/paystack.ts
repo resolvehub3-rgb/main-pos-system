@@ -46,7 +46,7 @@ export async function POST(request: Request): Promise<Response> {
   const guard = methodGuard(request, 'POST');
   if (guard) return guard;
 
-  const configResult = getCommerceConfig();
+  const configResult = getCommerceConfig(request);
   if (!configResult.ok) return notConfigured(configResult.missing, configResult.invalid);
   const config = configResult.config;
 

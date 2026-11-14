@@ -6,6 +6,8 @@ import type {ReactNode} from 'react';
  * made from these screens.
  */
 
+import {navigateRoute} from '../../lib/navigation';
+
 export default function AccountShell({
   title,
   subtitle,
@@ -21,7 +23,11 @@ export default function AccountShell({
     <section className="bg-slate-50 py-14 lg:py-20">
       <div className="mx-auto max-w-xl px-4 sm:px-6">
         <a
-          href="#/"
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            navigateRoute('/');
+          }}
           className="text-sm font-semibold text-navy-600 underline-offset-4 hover:text-amber-700 hover:underline"
         >
           ← Back to the SamTill website

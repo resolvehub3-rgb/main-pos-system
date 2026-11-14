@@ -8,7 +8,7 @@
  */
 
 import type {CommerceConfig} from './env.ts';
-import {insertRow} from './supabase.ts';
+import {commerceTable, insertRow} from './supabase.ts';
 
 export interface AuditEntry {
   actorUserId?: string | null;
@@ -22,7 +22,7 @@ export interface AuditEntry {
 
 export async function writeAudit(cfg: CommerceConfig, entry: AuditEntry): Promise<void> {
   try {
-    await insertRow(cfg, 'audit_logs', {
+    await insertRow(cfg, commerceTable(cfg, 'audit_logs'), {
       actor_user_id: entry.actorUserId ?? null,
       actor_system: entry.actorSystem ?? 'service_role',
       action: entry.action,

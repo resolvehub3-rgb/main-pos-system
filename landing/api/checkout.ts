@@ -37,7 +37,7 @@ import {PaystackError, initializeTransaction} from './_lib/paystack-client.ts';
 import {checkRateLimit, sharedBuckets} from './_lib/rate-limit.ts';
 import {requireSession} from './_lib/session.ts';
 import type {OrderRow} from './_lib/context.ts';
-import {insertRow, selectRows, updateRows, BackendError} from './_lib/supabase.ts';
+import {BackendError, commerceTable, insertRow, selectRows, updateRows} from './_lib/supabase.ts';
 
 const PLAN_COLUMNS = 'code,name,amount_minor,currency,interval_months,entitlement_product,active';
 const CHECKOUT_RATE = {limit: 10, windowMs: 10 * 60 * 1000};
@@ -50,7 +50,7 @@ export async function POST(request: Request): Promise<Response> {
   const guard = methodGuard(request, 'POST');
   if (guard) return guard;
 
-  const configResult = getCommerceConfig();
+  const configResult = getCommerceConfig(request);
   if (!configResult.ok) return notConfigured(configResult.missing, configResult.invalid);
   const config = configResult.config;
 
@@ -72,7 +72,7 @@ export async function POST(request: Request): Promise<Response> {
 
   let plans: PlanRow[];
   try {
-    plans = await selectRows<PlanRow>(config, 'plans', `select=${PLAN_COLUMNS}`);
+    plans = await selectRows<PlanRow>(config, commerceTable(config, 'plans'), `select=${PLAN_COLUMNS}`);
   } catch (cause) {
     console.error(`commerce: checkout plan load failed: ${String(cause)}`);
     return apiError(502, 'backend_unavailable', 'Could not load plans right now. Please try again shortly.');
@@ -93,7 +93,7 @@ export async function POST(request: Request): Promise<Response> {
 
   let order: OrderRow;
   try {
-    const inserted = await insertRow<OrderRow>(config, 'orders', {
+    const inserted = await insertRow<OrderRow>(config, commerceTable(config, 'orders'), {
       user_id: session.user.userId,
       plan_code: plan.code,
       amount_minor: plan.amount_minor,
@@ -123,7 +123,7 @@ export async function POST(request: Request): Promise<Response> {
       },
     });
 
-    await updateRows(config, 'orders', `reference=eq.${encodeURIComponent(reference)}`, {
+    await updateRows(config, commerceTable(config, 'orders'), `reference=eq.${encodeURIComponent(reference)}`, {
       paystack_authorization_url: initialized.authorizationUrl,
     });
 

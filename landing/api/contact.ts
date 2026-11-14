@@ -8,7 +8,7 @@
  * RLS) so SamTeck Digital can follow up. No authentication required — this is
  * a public enquiry form. Rate-limited per IP.
  */
-import {getCommerceConfig} from './_lib/env.ts';
+import {getDatabaseConfig} from './_lib/env.ts';
 import {
   apiError,
   clientIp,
@@ -42,7 +42,7 @@ export async function POST(request: Request): Promise<Response> {
   const guard = methodGuard(request, 'POST');
   if (guard) return guard;
 
-  const configResult = getCommerceConfig();
+  const configResult = getDatabaseConfig(request);
   if (!configResult.ok) return notConfigured(configResult.missing, configResult.invalid);
   const config = configResult.config;
 

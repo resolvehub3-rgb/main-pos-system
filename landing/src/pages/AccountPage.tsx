@@ -35,7 +35,7 @@ import {useAccountSession} from '../lib/useAccountSession';
 
 function planLabel(planCode: string | null): string {
   const match = planCode ? PACKAGES.find((pkg) => pkg.id === planCode) : undefined;
-  return match ? match.name : planCode ?? 'SamTill licence';
+  return match ? `${match.productName} – ${match.name}` : planCode ?? 'SamTill POS – 6-Month Subscription';
 }
 
 export default function AccountPage() {
@@ -362,24 +362,24 @@ export default function AccountPage() {
 
       {access?.ok && (access.entitlements.length > 0 || checkout.available) && (
         <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-          <h2 className="text-sm font-bold text-navy-900">Your SamTill licence</h2>
+          <h2 className="text-sm font-bold text-navy-900">Your SamTill POS Subscription</h2>
           {access.entitlements.length === 0 ? (
             <>
               <p className="mt-1 text-sm text-navy-700">
-                This account does not have a licence yet. Choose a package to buy one — your
-                licence appears here as soon as payment is confirmed.
+                This account does not have an active 6-Month Subscription yet. Activate now for
+                GH₵500.00 (single upfront payment for 6 months).
               </p>
               {checkout.available ? (
                 <button
                   type="button"
-                  onClick={() => navigateTo('/checkout')}
+                  onClick={() => navigateTo('/checkout?plan=samtill-6m')}
                   className="mt-3 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
                 >
-                  Choose a package →
+                  PAY NOW — GH₵500.00 →
                 </button>
               ) : (
                 <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                  Packages are listed on the website; contact SamTeck Digital to purchase.
+                  Subscription details are listed on the Pricing page.
                 </p>
               )}
             </>
@@ -408,10 +408,10 @@ export default function AccountPage() {
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
                       {withinWindow
-                        ? 'Access and included support run until '
+                        ? 'Active subscription valid until '
                         : entitlement.status === 'revoked'
-                          ? 'Access was revoked on '
-                          : 'Included access ended on '}
+                          ? 'Subscription revoked on '
+                          : 'Subscription expired on '}
                       {new Date(entitlement.validTo).toLocaleDateString('en-GH', {
                         day: 'numeric',
                         month: 'long',
@@ -434,29 +434,26 @@ export default function AccountPage() {
             checkout.available && (
               <button
                 type="button"
-                onClick={() => navigateTo('/checkout')}
+                onClick={() => navigateTo('/checkout?plan=samtill-6m')}
                 className="mt-4 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
               >
-                Renew or buy again →
+                Renew 6-Month Subscription (GH₵500.00) →
               </button>
             )}
         </div>
       )}
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-        <h2 className="text-sm font-bold text-navy-900">Get the app</h2>
+        <h2 className="text-sm font-bold text-navy-900">Launch SamTill POS</h2>
         <p className="mt-1 text-sm text-navy-700">
-          SamTill runs in the browser and installs as an app. Open the SamTill web app, then use
-          your browser’s Install app / Add to Home Screen feature to keep it on your device.
+          Open the isolated POS workspace directly or install SamTill as an app on your till device.
         </p>
-        {SITE.webAppUrl && (
-          <a
-            href={SITE.webAppUrl}
-            className="mt-3 inline-flex rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
-          >
-            Open the SamTill app →
-          </a>
-        )}
+        <a
+          href={SITE.webAppUrl}
+          className="mt-3 inline-flex rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
+        >
+          Open SamTill POS →
+        </a>
       </div>
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
