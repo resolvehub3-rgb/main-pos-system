@@ -36,7 +36,12 @@ import {resolveCheckoutPlan, toPublicPlan, type PlanRow} from './_lib/plans.ts';
 import {PaystackError, initializeTransaction} from './_lib/paystack-client.ts';
 import {checkRateLimit, sharedBuckets} from './_lib/rate-limit.ts';
 import {requireSession} from './_lib/session.ts';
-import type {OrderRow} from './_lib/context.ts';
+import {
+  loadActiveMembershipForUser,
+  loadEntitlementForUser,
+  loadTenantById,
+  type OrderRow,
+} from './_lib/context.ts';
 import {insertRow, selectRows, updateRows, BackendError} from './_lib/supabase.ts';
 
 const PLAN_COLUMNS = 'code,name,amount_minor,currency,interval_months,entitlement_product,active';
@@ -44,6 +49,13 @@ const CHECKOUT_RATE = {limit: 10, windowMs: 10 * 60 * 1000};
 
 interface CheckoutBody {
   planCode?: unknown;
+  returnTo?: unknown;
+}
+
+function isFutureIso(iso: string | null | undefined, nowMs: number): boolean {
+  if (!iso) return false;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) && ms > nowMs;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -88,13 +100,48 @@ export async function POST(request: Request): Promise<Response> {
     return apiError(400, 'email_required', 'Your account needs an email address before you can pay.');
   }
 
+  // Resolve active POS tenant membership + existing subscription/entitlement so we never double-charge active subscribers.
+  const nowMs = Date.now();
+  const [membership, existingEntitlement] = await Promise.all([
+    loadActiveMembershipForUser(config, session.user.userId).catch(() => null),
+    loadEntitlementForUser(config, session.user.userId, plan.entitlement_product).catch(() => null),
+  ]);
+
+  const tenant = membership
+    ? await loadTenantById(config, membership.tenant_id).catch(() => null)
+    : null;
+
+  const hasActiveEntitlement =
+    existingEntitlement !== null &&
+    existingEntitlement.status === 'active' &&
+    isFutureIso(existingEntitlement.valid_to, nowMs);
+
+  const hasActiveTenantSubscription =
+    tenant !== null &&
+    tenant.is_active &&
+    tenant.subscription_status === 'active' &&
+    (!tenant.subscription_expires_at || isFutureIso(tenant.subscription_expires_at, nowMs));
+
+  if (hasActiveEntitlement || hasActiveTenantSubscription) {
+    const validTo =
+      existingEntitlement?.valid_to ?? tenant?.subscription_expires_at ?? null;
+    return apiError(
+      409,
+      'already_subscribed',
+      'Your SamTill POS 6-month subscription is already active.',
+      {extra: {validTo}},
+    );
+  }
+
   // Server-generated reference: unpredictable, matches the orders constraint.
   const reference = `st_${crypto.randomUUID().replace(/-/g, '')}`;
+  const tenantId = membership?.tenant_id ?? null;
 
   let order: OrderRow;
   try {
     const inserted = await insertRow<OrderRow>(config, 'orders', {
       user_id: session.user.userId,
+      tenant_id: tenantId,
       plan_code: plan.code,
       amount_minor: plan.amount_minor,
       currency: plan.currency,
@@ -109,15 +156,22 @@ export async function POST(request: Request): Promise<Response> {
     return apiError(502, 'checkout_unavailable', 'Could not start checkout right now. Please try again shortly.');
   }
 
+  const returnTo = body.value.returnTo === 'pos' ? 'pos' : 'web';
+  const callbackUrl =
+    returnTo === 'pos'
+      ? `${config.appBaseUrl}/app/dashboard?checkout=return`
+      : `${config.appBaseUrl}/?checkout=return`;
+
   try {
     const initialized = await initializeTransaction(config, {
       email: session.user.email,
       amountMinor: plan.amount_minor,
       currency: plan.currency,
       reference,
-      callbackUrl: `${config.appBaseUrl}/?checkout=return`,
+      callbackUrl,
       metadata: {
         user_id: session.user.userId,
+        ...(tenantId ? {tenant_id: tenantId} : {}),
         plan_code: plan.code,
         source: 'samtill_commerce',
       },
@@ -133,11 +187,16 @@ export async function POST(request: Request): Promise<Response> {
       action: 'checkout_initiated',
       entity: 'order',
       entityId: reference,
-      metadata: {plan_code: plan.code, amount_minor: plan.amount_minor, currency: plan.currency},
+      metadata: {
+        plan_code: plan.code,
+        amount_minor: plan.amount_minor,
+        currency: plan.currency,
+        ...(tenantId ? {tenant_id: tenantId} : {}),
+      },
     });
 
     return json({
-      reference,
+      reference: order.reference,
       authorizationUrl: initialized.authorizationUrl,
       plan: toPublicPlan(plan),
     });

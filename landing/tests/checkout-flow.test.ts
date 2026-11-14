@@ -36,6 +36,7 @@ import {
   fetchMyAccess,
   fetchPublishedPlans,
   formatMinorAmount,
+  hasActiveSubscriptionAccess,
   startCheckout,
   verifyPayment,
   verifyWithBackoff,
@@ -468,6 +469,79 @@ test('access: the request is authenticated and cache-free', async () => {
     },
   });
   assertEqual(auth, 'Bearer token-xyz', 'bearer token sent');
+});
+
+test('checkout: 409 already_subscribed prevents duplicate purchase and returnTo passes through', async () => {
+  const blocked = classifyCheckoutResponse(409, {
+    error: 'already_subscribed',
+    message: 'Your SamTill POS 6-month subscription is already active.',
+  });
+  assert(!blocked.ok && blocked.kind === 'already_subscribed' && !blocked.retryable);
+
+  let sentBody: unknown = null;
+  await startCheckout({
+    apiBase: API,
+    accessToken: 'tok',
+    planCode: 'samtill-pos-6m',
+    returnTo: 'pos',
+    fetchImpl: async (_input, init) => {
+      sentBody = init?.body ? JSON.parse(String(init.body)) : null;
+      return jsonResponse(200, {
+        reference: 'st_pos_12345678',
+        authorizationUrl: 'https://checkout.paystack.com/pos',
+        plan: PLAN_ROW,
+      });
+    },
+  });
+  assertEqual(sentBody, {planCode: 'samtill-pos-6m', returnTo: 'pos'});
+});
+
+test('access: active tenant or unexpired entitlement unlocks without double charging', () => {
+  const now = Date.parse('2026-11-01T00:00:00.000Z');
+  const activeAccess = classifyAccessResponse(200, {
+    subscription: null,
+    entitlements: [{...ENTITLEMENT, planCode: 'samtill-pos-6m'}],
+    tenant: {
+      id: 'tenant-1',
+      name: 'Accra Fresh Mart',
+      isActive: true,
+      subscriptionStatus: 'active',
+      subscriptionPlanCode: 'samtill-pos-6m',
+      subscriptionStartedAt: '2026-10-28T10:00:00.000Z',
+      subscriptionExpiresAt: '2027-04-28T10:00:00.000Z',
+    },
+  });
+  assert(activeAccess.ok);
+  if (activeAccess.ok) {
+    assertEqual(activeAccess.tenant?.name, 'Accra Fresh Mart');
+    const summary = hasActiveSubscriptionAccess(activeAccess, now);
+    assertEqual(summary.active, true);
+    assertEqual(summary.validTo, '2027-04-28T10:00:00.000Z');
+  }
+
+  const expiredAccess = classifyAccessResponse(200, {
+    subscription: null,
+    entitlements: [
+      {
+        ...ENTITLEMENT,
+        validFrom: '2025-01-01T00:00:00.000Z',
+        validTo: '2025-07-01T00:00:00.000Z',
+      },
+    ],
+    tenant: {
+      id: 'tenant-1',
+      name: 'Accra Fresh Mart',
+      isActive: true,
+      subscriptionStatus: 'trial',
+      subscriptionPlanCode: null,
+      subscriptionStartedAt: null,
+      subscriptionExpiresAt: null,
+    },
+  });
+  assert(expiredAccess.ok);
+  if (expiredAccess.ok) {
+    assertEqual(hasActiveSubscriptionAccess(expiredAccess, now).active, false);
+  }
 });
 
 // ---------------------------------------------------------------------------

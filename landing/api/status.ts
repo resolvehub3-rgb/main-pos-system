@@ -8,17 +8,18 @@
  * deployment is inert until the owner provisions the commerce backend.
  */
 
-import {getCommerceConfig, readFlag} from './_lib/env.ts';
+import {getCommerceConfig, readEnabledByDefaultFlag, readFlag} from './_lib/env.ts';
 import {json, methodGuard} from './_lib/http.ts';
 
 const ENDPOINTS: Array<{method: string; path: string; status: string}> = [
   {method: 'GET', path: '/api/status', status: 'implemented'},
   {method: 'GET', path: '/api/plans', status: 'implemented_requires_backend'},
-  {method: 'POST', path: '/api/checkout', status: 'implemented_requires_backend_and_approval'},
-  {method: 'POST', path: '/api/verify', status: 'implemented_requires_backend_and_approval'},
-  {method: 'POST', path: '/api/webhooks/paystack', status: 'implemented_requires_backend_and_approval'},
+  {method: 'POST', path: '/api/checkout', status: 'implemented_requires_backend'},
+  {method: 'POST', path: '/api/verify', status: 'implemented_requires_backend'},
+  {method: 'POST', path: '/api/webhooks/paystack', status: 'implemented_requires_backend'},
   {method: 'GET', path: '/api/subscription', status: 'implemented_requires_backend'},
   {method: 'POST', path: '/api/subscription', status: 'skeleton_not_implemented'},
+  {method: 'POST', path: '/api/contact', status: 'implemented_requires_backend'},
 ];
 
 export function GET(request: Request): Response {
@@ -29,15 +30,15 @@ export function GET(request: Request): Response {
 
   return json({
     service: 'samtill-commerce',
-    phase: 'preparation_only',
+    phase: configResult.ok ? 'ready' : 'unconfigured',
     description:
-      'SamTill customer commerce API. Every endpoint fails closed (503) until the dedicated commerce backend is provisioned and approved.',
+      'SamTill customer commerce API. Connects to the SamTill POS Supabase backend and Paystack when environment variables are configured.',
     backendConfigured: configResult.ok,
     missing: configResult.ok ? [] : configResult.missing,
     invalid: configResult.ok ? [] : configResult.invalid,
     flags: {
-      checkoutEnabled: readFlag('CHECKOUT_ENABLED'),
-      publishPrices: readFlag('PUBLISH_PRICES'),
+      checkoutEnabled: readEnabledByDefaultFlag('CHECKOUT_ENABLED'),
+      publishPrices: readEnabledByDefaultFlag('PUBLISH_PRICES'),
       allowLivePayments: readFlag('ALLOW_LIVE_PAYMENTS'),
     },
     endpoints: ENDPOINTS,

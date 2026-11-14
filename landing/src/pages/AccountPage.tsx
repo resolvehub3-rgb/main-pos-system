@@ -4,28 +4,21 @@ import GateNotice from '../components/account/GateNotice';
 import StatusBanner, {type BannerTone} from '../components/account/StatusBanner';
 import {COMMERCE} from '../config/commerce';
 import {SUBSCRIPTION_PLAN} from '../config/pricing';
-import {SITE} from '../config/site';
 import {accountAvailability, checkoutAvailability} from '../lib/availability';
 import {resendConfirmation} from '../lib/authFlow';
-import {
-  approvalView,
-  canRequestSetup,
-  fetchApprovalStatus,
-  fetchIsAdmin,
-  hasOpenSetupRequest,
-  requestSetup,
-  subscribeToApproval,
-  type ApprovalStatus,
-} from '../lib/accountStatus';
 import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
-import {fetchMyAccess, type AccessResult} from '../lib/checkoutClient';
+import {
+  fetchMyAccess,
+  hasActiveSubscriptionAccess,
+  type AccessResult,
+} from '../lib/checkoutClient';
 import {navigateTo} from '../lib/navigation';
 import {createAuthProvider} from '../lib/supabaseAdapter';
 import {useAccountSession} from '../lib/useAccountSession';
 
 /**
- * Signed-in customer account screen: identity, email-verification status,
- * the subscription this account holds, how to open the app, and sign-out.
+ * Signed-in customer & business owner account screen.
+ * Reads real subscription and business details via /api/subscription.
  */
 
 function planLabel(planCode: string | null): string {
@@ -35,55 +28,26 @@ function planLabel(planCode: string | null): string {
   return planCode;
 }
 
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GH', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 export default function AccountPage() {
-  const availability = accountAvailability(COMMERCE, readCommerceEnv());
-  const checkout = checkoutAvailability(COMMERCE, readCommerceEnv());
+  const env = readCommerceEnv();
+  const availability = accountAvailability(COMMERCE, env);
+  const checkout = checkoutAvailability(COMMERCE, env);
   const {loading, account, session, signOut} = useAccountSession();
   const [banner, setBanner] = useState<{tone: BannerTone; message: string} | null>(null);
   const [resending, setResending] = useState(false);
   const [access, setAccess] = useState<AccessResult | null>(null);
 
   const client = getCommerceAuth();
-  const userId = account?.userId ?? '';
-  // null = still loading; drives the waiting / approved / rejected screens.
-  const [approval, setApproval] = useState<ApprovalStatus | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [setupState, setSetupState] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle');
-  const [setupNote, setSetupNote] = useState('');
-  const [hasOpenRequest, setHasOpenRequest] = useState<boolean | null>(null);
-
   const accessToken = account?.accessToken ?? '';
-  const apiBase = readCommerceEnv().apiBase;
-
-  // Load the customer's approval status, then watch it live so the dashboard
-  // unlocks (or a rejection appears) the instant an admin decides — no reload.
-  useEffect(() => {
-    if (!client || !userId) {
-      setApproval(null);
-      setIsAdmin(false);
-      return;
-    }
-    let active = true;
-
-    void fetchApprovalStatus(client, userId).then((result) => {
-      if (!active) return;
-      setApproval(result.ok ? result.status : 'unknown');
-    });
-    void fetchIsAdmin(client).then((value) => {
-      if (active) setIsAdmin(value);
-    });
-    void hasOpenSetupRequest(client).then((value) => {
-      if (active) setHasOpenRequest(value);
-    });
-
-    const unsubscribe = subscribeToApproval(client, userId, (status) => {
-      if (active) setApproval(status);
-    });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [client, userId]);
+  const apiBase = env.apiBase;
 
   useEffect(() => {
     if (!accessToken) {
@@ -136,9 +100,9 @@ export default function AccountPage() {
   }
 
   const sessionUserEmail = account.email ?? '';
-  // The provider only sets email_confirmed_at once verification succeeded.
   const emailConfirmed = Boolean(session?.user?.email_confirmed_at);
-  const view = approvalView(approval);
+  const tenant = access?.ok ? access.tenant ?? null : null;
+  const activeWindow = access?.ok ? hasActiveSubscriptionAccess(access) : {active: false, validFrom: null, validTo: null};
 
   async function handleResend() {
     if (!client || !sessionUserEmail) return;
@@ -158,145 +122,10 @@ export default function AccountPage() {
     setBanner({tone: 'info', message: 'You have been signed out.'});
   }
 
-  async function handleRequestSetup() {
-    if (!client) return;
-    setSetupState('submitting');
-    const result = await requestSetup(client, setupNote);
-    if (result.ok) {
-      setSetupState('done');
-      setHasOpenRequest(true);
-    } else {
-      setSetupState('error');
-      setBanner({tone: 'error', message: result.message});
-    }
-  }
-
-  // --- Approval-gated screens ---------------------------------------------
-  // A pending or rejected account never sees the dashboard or licence area.
-
-  const signOutButton = (
-    <button
-      type="button"
-      onClick={handleSignOut}
-      className="mt-6 w-full rounded-full border border-slate-300 px-6 py-3 text-sm font-bold text-navy-800 transition-colors hover:border-navy-400 hover:bg-slate-50"
-    >
-      Sign out
-    </button>
-  );
-
-  const verifyReminder = !emailConfirmed && (
-    <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
-      Your email address has not been verified yet. Open the confirmation link we emailed you, or
-      send it again.
-      <button
-        type="button"
-        onClick={handleResend}
-        disabled={resending}
-        className="mt-3 block rounded-full bg-amber-700 px-5 py-2 text-xs font-bold text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-      >
-        {resending ? 'Sending…' : 'Resend confirmation email'}
-      </button>
-    </div>
-  );
-
-  if (view === 'loading') {
-    return (
-      <AccountShell title="My account" subtitle="Your SamTill customer account details.">
-        {banner && <StatusBanner tone={banner.tone}>{banner.message}</StatusBanner>}
-        <p className="text-sm text-navy-700">Checking your account status…</p>
-        {signOutButton}
-      </AccountShell>
-    );
-  }
-
-  if (view === 'waiting') {
-    return (
-      <AccountShell
-        title="My account"
-        subtitle="Your SamTill customer account details."
-        footer={
-          <a href="#/" className="font-semibold text-navy-700 underline-offset-4 hover:underline">
-            Back to the SamTill website
-          </a>
-        }
-      >
-        {banner && <StatusBanner tone={banner.tone}>{banner.message}</StatusBanner>}
-        <dl className="mt-2 space-y-4 text-sm">
-          <div>
-            <dt className="font-bold text-navy-900">Email address</dt>
-            <dd className="mt-0.5 text-navy-700">{sessionUserEmail || 'Not available'}</dd>
-          </div>
-        </dl>
-
-        <div
-          role="status"
-          className="mt-5 rounded-xl border border-sky-300 bg-sky-50 p-5 text-sm leading-relaxed text-sky-900"
-        >
-          <p className="font-bold">Your account is waiting for approval.</p>
-          <p className="mt-1">
-            Thanks for registering. A member of the SamTeck Digital team will review your account
-            shortly. You will receive an email the moment it is approved — this page updates
-            automatically, so you can keep it open.
-          </p>
-        </div>
-
-        {verifyReminder}
-
-        <p className="mt-5 text-xs leading-relaxed text-slate-500">
-          Need help sooner? Contact SamTeck Digital and we will help you get set up.
-        </p>
-
-        {signOutButton}
-      </AccountShell>
-    );
-  }
-
-  if (view === 'rejected') {
-    return (
-      <AccountShell
-        title="My account"
-        subtitle="Your SamTill customer account details."
-        footer={
-          <a href="#contact" className="font-semibold text-amber-700 underline-offset-4 hover:underline">
-            Contact SamTeck Digital
-          </a>
-        }
-      >
-        {banner && <StatusBanner tone={banner.tone}>{banner.message}</StatusBanner>}
-        <div
-          role="status"
-          className="mt-2 rounded-xl border border-red-300 bg-red-50 p-5 text-sm leading-relaxed text-red-900"
-        >
-          <p className="font-bold">Your account was not approved.</p>
-          <p className="mt-1">
-            This registration could not be approved. If you believe this is a mistake, or you would
-            like to discuss a SamTill setup, please contact SamTeck Digital.
-          </p>
-        </div>
-        {signOutButton}
-      </AccountShell>
-    );
-  }
-
-  if (view === 'unknown') {
-    return (
-      <AccountShell title="My account" subtitle="Your SamTill customer account details.">
-        <GateNotice
-          notice="We could not confirm your account status. Please contact SamTeck Digital and we will look into it."
-          actionHref="#contact"
-          actionLabel="Contact us"
-        />
-        {signOutButton}
-      </AccountShell>
-    );
-  }
-
-  // --- Approved: the full dashboard ---------------------------------------
-
   return (
     <AccountShell
       title="My account"
-      subtitle="Your SamTill customer account details."
+      subtitle="Your SamTill POS business account and subscription details."
       footer={
         <a href="#/" className="font-semibold text-navy-700 underline-offset-4 hover:underline">
           Back to the SamTill website
@@ -310,6 +139,12 @@ export default function AccountPage() {
           <dt className="font-bold text-navy-900">Email address</dt>
           <dd className="mt-0.5 text-navy-700">{sessionUserEmail || 'Not available'}</dd>
         </div>
+        {tenant && (
+          <div>
+            <dt className="font-bold text-navy-900">Business / Shop</dt>
+            <dd className="mt-0.5 text-navy-700">{tenant.name}</dd>
+          </div>
+        )}
         <div>
           <dt className="font-bold text-navy-900">Email verification</dt>
           <dd className="mt-0.5">
@@ -324,28 +159,12 @@ export default function AccountPage() {
             )}
           </dd>
         </div>
-        <div>
-          <dt className="font-bold text-navy-900">Account status</dt>
-          <dd className="mt-0.5">
-            <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-800">
-              Approved
-            </span>
-          </dd>
-        </div>
       </dl>
-
-      {isAdmin && (
-        <p className="mt-4 text-sm">
-          <a href="#/admin" className="font-semibold text-amber-700 underline-offset-4 hover:underline">
-            Open the admin approval dashboard →
-          </a>
-        </p>
-      )}
 
       {!emailConfirmed && (
         <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900">
-          Your email address has not been verified yet. Check your inbox for the confirmation
-          link, or send it again.
+          Your email address has not been verified yet. Check your inbox for the confirmation link,
+          or send it again.
           <button
             type="button"
             onClick={handleResend}
@@ -357,145 +176,75 @@ export default function AccountPage() {
         </div>
       )}
 
-      {access?.ok && (access.entitlements.length > 0 || checkout.available) && (
+      {access === null && (
+        <p className="mt-6 text-sm text-slate-600">Loading your SamTill POS subscription status…</p>
+      )}
+
+      {access && !access.ok && (
+        <div className="mt-6">
+          <StatusBanner tone="info">{access.message}</StatusBanner>
+        </div>
+      )}
+
+      {access?.ok && (
         <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-          <h2 className="text-sm font-bold text-navy-900">Your SamTill POS subscription</h2>
-          {access.entitlements.length === 0 ? (
+          <h2 className="text-sm font-bold text-navy-900">SamTill POS 6-Month Subscription</h2>
+
+          {activeWindow.active ? (
+            <div className="mt-3 space-y-2 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-navy-900">
+                  {planLabel(tenant?.subscriptionPlanCode ?? SUBSCRIPTION_PLAN.id)}
+                </span>
+                <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-800">
+                  Active
+                </span>
+              </div>
+              {activeWindow.validFrom && (
+                <p className="text-xs text-slate-600">
+                  Started: <strong className="text-navy-900">{formatDate(activeWindow.validFrom)}</strong>
+                </p>
+              )}
+              {activeWindow.validTo && (
+                <p className="text-xs text-slate-600">
+                  Valid until: <strong className="text-emerald-800">{formatDate(activeWindow.validTo)}</strong>
+                </p>
+              )}
+            </div>
+          ) : (
             <>
-              <p className="mt-1 text-sm text-navy-700">
-                This account does not have an active 6-Month Subscription yet. Activate for{' '}
-                {SUBSCRIPTION_PLAN.currency}
-                {SUBSCRIPTION_PLAN.price.toFixed(2)} — access starts immediately upon payment verification.
+              <p className="mt-1.5 text-sm text-navy-700">
+                No active 6-Month Subscription is linked to this account yet. Complete a single upfront
+                payment of GH₵{SUBSCRIPTION_PLAN.price.toFixed(2)} to activate your POS workspace for 6
+                months.
               </p>
-              {checkout.available ? (
+              {checkout.available && (
                 <button
                   type="button"
                   onClick={() => navigateTo(`/checkout?plan=${SUBSCRIPTION_PLAN.id}`)}
-                  className="mt-3 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
+                  className="mt-4 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
                 >
-                  Pay Now (GH₵500.00 / 6 Months) →
+                  PAY NOW (GH₵500.00 / 6 Months) →
                 </button>
-              ) : (
-                <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                  Subscription pricing is listed on the Pricing page.
-                </p>
               )}
             </>
-          ) : (
-            <ul className="mt-3 space-y-4">
-              {access.entitlements.map((entitlement) => {
-                const now = Date.now();
-                const withinWindow =
-                  entitlement.status === 'active' && Date.parse(entitlement.validTo) > now;
-                const badge = withinWindow
-                  ? {label: 'Active', classes: 'bg-emerald-100 text-emerald-800'}
-                  : entitlement.status === 'revoked'
-                    ? {label: 'Revoked', classes: 'bg-red-100 text-red-800'}
-                    : {label: 'Expired', classes: 'bg-slate-200 text-slate-700'};
-                return (
-                  <li key={`${entitlement.planCode ?? entitlement.productCode}-${entitlement.validTo}`}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm font-bold text-navy-900">
-                        {planLabel(entitlement.planCode)}
-                      </span>
-                      <span
-                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${badge.classes}`}
-                      >
-                        {badge.label}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {withinWindow
-                        ? 'Access and included support run until '
-                        : entitlement.status === 'revoked'
-                          ? 'Access was revoked on '
-                          : 'Included access ended on '}
-                      {new Date(entitlement.validTo).toLocaleDateString('en-GH', {
-                        day: 'numeric',
-                        month: 'long',
-                        year: 'numeric',
-                      })}
-                      .
-                    </p>
-                  </li>
-                );
-              })}
-            </ul>
           )}
-          {access.ok &&
-            access.entitlements.length > 0 &&
-            access.entitlements.every(
-              (entitlement) =>
-                entitlement.status !== 'active' ||
-                Date.parse(entitlement.validTo) <= Date.now(),
-            ) &&
-            checkout.available && (
-              <button
-                type="button"
-                onClick={() => navigateTo(`/checkout?plan=${SUBSCRIPTION_PLAN.id}`)}
-                className="mt-4 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
-              >
-                Renew 6-Month Subscription (GH₵500.00) →
-              </button>
-            )}
         </div>
       )}
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-        <h2 className="text-sm font-bold text-navy-900">Get the app</h2>
+        <h2 className="text-sm font-bold text-navy-900">Open SamTill POS</h2>
         <p className="mt-1 text-sm text-navy-700">
-          SamTill runs in the browser and installs as an app. Open the SamTill web app, then use
-          your browser’s Install app / Add to Home Screen feature to keep it on your device.
+          Open the POS terminal and management workspace in your browser, or install it on this
+          device as a PWA.
         </p>
-        {SITE.webAppUrl && (
-          <a
-            href={SITE.webAppUrl}
-            className="mt-3 inline-flex rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
-          >
-            Open the SamTill app →
-          </a>
-        )}
+        <a
+          href="/app/dashboard"
+          className="mt-3 inline-flex rounded-full bg-navy-900 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-navy-800"
+        >
+          Open SamTill POS →
+        </a>
       </div>
-
-      <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-        <h2 className="text-sm font-bold text-navy-900">Request setup</h2>
-        {hasOpenRequest || setupState === 'done' ? (
-          <p className="mt-1 text-sm leading-relaxed text-navy-700">
-            Thanks — your setup request has been received. The SamTeck Digital team will be in
-            touch to help you get SamTill running.
-          </p>
-        ) : (
-          <>
-            <p className="mt-1 text-sm text-navy-700">
-              Want a hand getting started? Send us a note and we will help you set up SamTill.
-            </p>
-            <label htmlFor="setup-note" className="mt-3 block text-xs font-bold text-navy-800">
-              Anything we should know? (optional)
-            </label>
-            <textarea
-              id="setup-note"
-              rows={3}
-              value={setupNote}
-              onChange={(event) => setSetupNote(event.target.value)}
-              placeholder="e.g. We run a supermarket in Accra and need help adding products."
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-navy-900 placeholder:text-slate-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-            />
-            <button
-              type="button"
-              onClick={() => void handleRequestSetup()}
-              disabled={setupState === 'submitting'}
-              className="mt-3 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-            >
-              {setupState === 'submitting' ? 'Sending…' : 'Request setup help'}
-            </button>
-          </>
-        )}
-      </div>
-
-      <p className="mt-6 rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed text-slate-500">
-        Your account holds your licence and account information. Creating an
-        account does not activate a SamTill POS licence and does not commit you to any payment.
-      </p>
 
       <button
         type="button"

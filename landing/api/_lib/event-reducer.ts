@@ -33,6 +33,7 @@ export interface OrderState {
   id: string;
   reference: string;
   user_id: string;
+  tenant_id?: string | null;
   plan_code: string;
   amount_minor: number;
   currency: string;
@@ -44,6 +45,7 @@ export interface OrderState {
 export interface EntitlementState {
   id: string;
   user_id: string;
+  tenant_id?: string | null;
   product_code: string;
   plan_code: string | null;
   source_order_id: string | null;
@@ -55,6 +57,7 @@ export interface EntitlementState {
 export interface SubscriptionState {
   id: string;
   user_id: string;
+  tenant_id?: string | null;
   plan_code: string;
   paystack_subscription_code: string | null;
   status: SubscriptionStatus;
@@ -273,6 +276,7 @@ function reduceChargeSuccess(context: ReduceContext): Reduction {
         valid_to: endMs,
         plan_code: plan.code,
         source_order_id: order.id,
+        ...(order.tenant_id ? {tenant_id: order.tenant_id} : {}),
       };
       if (entitlement.status !== 'active') {
         // Reactivating a previously expired/revoked row restarts its window.
@@ -283,6 +287,7 @@ function reduceChargeSuccess(context: ReduceContext): Reduction {
       reduction.entitlementAction = 'create';
       reduction.entitlementPatch = {
         user_id: order.user_id,
+        ...(order.tenant_id ? {tenant_id: order.tenant_id} : {}),
         product_code: plan.entitlement_product,
         plan_code: plan.code,
         source_order_id: order.id,
@@ -298,7 +303,11 @@ function reduceChargeSuccess(context: ReduceContext): Reduction {
   const subscriptionCode = extractEventKeys(event).subscriptionCode;
   if (subscriptionCode) {
     if (context.subscription) {
-      const patch: Partial<SubscriptionState> = {status: 'active', auto_renew: true};
+      const patch: Partial<SubscriptionState> = {
+        status: 'active',
+        auto_renew: true,
+        ...(order.tenant_id ? {tenant_id: order.tenant_id} : {}),
+      };
       if (context.subscription.paystack_subscription_code === null) {
         patch.paystack_subscription_code = subscriptionCode;
       }
@@ -308,6 +317,7 @@ function reduceChargeSuccess(context: ReduceContext): Reduction {
       reduction.subscriptionAction = 'create';
       reduction.subscriptionPatch = {
         user_id: order.user_id,
+        ...(order.tenant_id ? {tenant_id: order.tenant_id} : {}),
         plan_code: order.plan_code,
         paystack_subscription_code: subscriptionCode,
         status: 'active',
@@ -330,6 +340,7 @@ function reduceChargeSuccess(context: ReduceContext): Reduction {
         current_period_end: endIso,
         cancel_at_period_end: false,
         cancelled_at: null,
+        ...(order.tenant_id ? {tenant_id: order.tenant_id} : {}),
       };
       if (context.subscription.status !== 'active' || !context.subscription.current_period_start) {
         patch.current_period_start = startIso;
@@ -340,6 +351,7 @@ function reduceChargeSuccess(context: ReduceContext): Reduction {
       reduction.subscriptionAction = 'create';
       reduction.subscriptionPatch = {
         user_id: order.user_id,
+        ...(order.tenant_id ? {tenant_id: order.tenant_id} : {}),
         plan_code: plan.code,
         paystack_subscription_code: null,
         status: 'active',

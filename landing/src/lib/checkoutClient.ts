@@ -48,9 +48,20 @@ export type PlansFailureKind =
   | 'network'
   | 'invalid_response';
 
+export interface TenantBillingSummary {
+  id: string;
+  name: string;
+  isActive: boolean;
+  subscriptionStatus: string;
+  subscriptionPlanCode: string | null;
+  subscriptionStartedAt: string | null;
+  subscriptionExpiresAt: string | null;
+}
+
 export type CheckoutFailureKind =
   | 'auth_required'
   | 'session_expired'
+  | 'already_subscribed'
   | 'checkout_disabled'
   | 'plan_unavailable'
   | 'plan_not_found'
@@ -103,6 +114,7 @@ export type VerifyResult =
       outcome: string;
       entitlement: EntitlementSummary | null;
       subscription?: SubscriptionSummary | null;
+      tenant?: TenantBillingSummary | null;
     }
   | {
       ok: false;
@@ -165,6 +177,31 @@ function readSubscription(value: unknown): SubscriptionSummary | null {
     status,
     currentPeriodStart: typeof currentPeriodStart === 'string' ? currentPeriodStart : null,
     currentPeriodEnd: typeof currentPeriodEnd === 'string' ? currentPeriodEnd : null,
+  };
+}
+
+function readTenantSummary(value: unknown): TenantBillingSummary | null {
+  if (!isRecord(value)) return null;
+  const {
+    id,
+    name,
+    isActive,
+    subscriptionStatus,
+    subscriptionPlanCode,
+    subscriptionStartedAt,
+    subscriptionExpiresAt,
+  } = value;
+  if (typeof id !== 'string' || typeof name !== 'string' || typeof subscriptionStatus !== 'string') {
+    return null;
+  }
+  return {
+    id,
+    name,
+    isActive: Boolean(isActive),
+    subscriptionStatus,
+    subscriptionPlanCode: typeof subscriptionPlanCode === 'string' ? subscriptionPlanCode : null,
+    subscriptionStartedAt: typeof subscriptionStartedAt === 'string' ? subscriptionStartedAt : null,
+    subscriptionExpiresAt: typeof subscriptionExpiresAt === 'string' ? subscriptionExpiresAt : null,
   };
 }
 
@@ -349,6 +386,14 @@ export function classifyCheckoutResponse(
     });
   }
 
+  if (status === 409 && code === 'already_subscribed') {
+    return failure(
+      'already_subscribed',
+      serverMessage || 'Your SamTill POS 6-month subscription is already active.',
+      {retryable: false},
+    );
+  }
+
   if (status === 429) {
     return failure('rate_limited', serverMessage, {
       retryable: true,
@@ -372,6 +417,7 @@ export interface CheckoutRequestOptions {
   apiBase?: string;
   accessToken: string;
   planCode: string;
+  returnTo?: 'web' | 'pos';
   fetchImpl?: typeof fetch;
 }
 
@@ -392,7 +438,10 @@ export async function startCheckout(
         'content-type': 'application/json',
         authorization: `Bearer ${options.accessToken}`,
       },
-      body: JSON.stringify({planCode: options.planCode}),
+      body: JSON.stringify({
+        planCode: options.planCode,
+        ...(options.returnTo ? {returnTo: options.returnTo} : {}),
+      }),
       cache: 'no-store',
     });
   } catch {
@@ -438,6 +487,7 @@ export function classifyVerifyResponse(
       outcome: typeof record.outcome === 'string' ? record.outcome : 'unknown',
       entitlement: readEntitlement(record.entitlement),
       subscription: readSubscription(record.subscription),
+      tenant: readTenantSummary(record.tenant),
     };
   }
 
@@ -607,8 +657,42 @@ export interface AccessEntitlement {
 }
 
 export type AccessResult =
-  | {ok: true; entitlements: AccessEntitlement[]}
+  | {
+      ok: true;
+      entitlements: AccessEntitlement[];
+      subscription?: SubscriptionSummary | null;
+      tenant?: TenantBillingSummary | null;
+    }
   | {ok: false; kind: 'auth_required' | 'session_expired' | 'not_configured' | 'network' | 'backend_unavailable' | 'invalid_response'; message: string; retryable: boolean};
+
+/** Pure helper: true when either entitlement or tenant subscription is active and unexpired. */
+export function hasActiveSubscriptionAccess(
+  access: Extract<AccessResult, {ok: true}>,
+  nowMs: number = Date.now(),
+): {active: boolean; validFrom: string | null; validTo: string | null} {
+  for (const entitlement of access.entitlements) {
+    const validToMs = Date.parse(entitlement.validTo);
+    if (entitlement.status === 'active' && Number.isFinite(validToMs) && validToMs > nowMs) {
+      return {
+        active: true,
+        validFrom: entitlement.validFrom,
+        validTo: entitlement.validTo,
+      };
+    }
+  }
+  const tenant = access.tenant;
+  if (tenant && tenant.isActive && tenant.subscriptionStatus === 'active') {
+    const expiresMs = tenant.subscriptionExpiresAt ? Date.parse(tenant.subscriptionExpiresAt) : NaN;
+    if (!tenant.subscriptionExpiresAt || (Number.isFinite(expiresMs) && expiresMs > nowMs)) {
+      return {
+        active: true,
+        validFrom: tenant.subscriptionStartedAt,
+        validTo: tenant.subscriptionExpiresAt,
+      };
+    }
+  }
+  return {active: false, validFrom: null, validTo: null};
+}
 
 /** Map one GET /api/subscription response. Pure; unit-tested. */
 export function classifyAccessResponse(status: number, body: unknown): AccessResult {
@@ -642,7 +726,12 @@ export function classifyAccessResponse(status: number, body: unknown): AccessRes
         validTo,
       });
     }
-    return {ok: true, entitlements};
+    return {
+      ok: true,
+      entitlements,
+      subscription: readSubscription(record.subscription),
+      tenant: readTenantSummary(record.tenant),
+    };
   }
 
   if (status === 401) {

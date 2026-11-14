@@ -182,6 +182,10 @@ export function adoptTenant(raw: Record<string, unknown>): Tenant {
     subscription_status: SUBSCRIPTION_STATUSES.has(status)
       ? (status as Tenant['subscription_status'])
       : 'suspended',
+    subscription_plan_code: optionalText(raw.subscription_plan_code),
+    subscription_started_at: optionalText(raw.subscription_started_at),
+    subscription_expires_at: optionalText(raw.subscription_expires_at),
+    last_payment_reference: optionalText(raw.last_payment_reference),
     created_at: text(raw.created_at),
   };
 }

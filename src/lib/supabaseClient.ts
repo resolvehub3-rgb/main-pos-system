@@ -2279,26 +2279,61 @@ class DatabaseService {
     const client = this.supabaseClient;
     if (!client || !tenantId) return;
 
-    if (!this.tenants.some((t) => t.id === tenantId)) {
-      const { data, error } = await client.from('tenants').select('*').eq('id', tenantId).limit(1);
-      if (error) {
-        console.warn('Remote sign-in could not load the shop:', error.message);
-      } else if (data?.length) {
-        const tenant = data[0] as Tenant;
-        bindMirrorId(tenant.id);
+    const { data, error } = await client.from('tenants').select('*').eq('id', tenantId).limit(1);
+    if (error) {
+      console.warn('Remote sign-in could not load the shop:', error.message);
+    } else if (data?.length) {
+      const tenant = adoptTenant(data[0] as Record<string, unknown>);
+      bindMirrorId(tenant.id);
+      const existingIdx = this.tenants.findIndex((t) => t.id === tenant.id);
+      if (existingIdx >= 0) {
+        this.tenants[existingIdx] = tenant;
+      } else {
         this.tenants.push(tenant);
       }
     }
 
     if (!this.branches.some((b) => b.tenant_id === tenantId)) {
-      const { data, error } = await client.from('branches').select('*').eq('tenant_id', tenantId);
-      if (error) {
-        console.warn('Remote sign-in could not load the branches:', error.message);
-      } else if (data?.length) {
-        const branches = data as Branch[];
+      const { data: branchData, error: branchError } = await client
+        .from('branches')
+        .select('*')
+        .eq('tenant_id', tenantId);
+      if (branchError) {
+        console.warn('Remote sign-in could not load the branches:', branchError.message);
+      } else if (branchData?.length) {
+        const branches = branchData.map((row) => adoptBranch(row as Record<string, unknown>));
         branches.forEach((b) => bindMirrorId(b.id));
         this.branches.push(...branches);
       }
+    }
+  }
+
+  public async refreshTenantBilling(tenantId: string): Promise<Tenant | null> {
+    const client = this.supabaseClient;
+    if (!client || !tenantId) return null;
+    const { data, error } = await client.from('tenants').select('*').eq('id', tenantId).limit(1);
+    if (error || !data?.length) return null;
+    const tenant = adoptTenant(data[0] as Record<string, unknown>);
+    bindMirrorId(tenant.id);
+    const idx = this.tenants.findIndex((t) => t.id === tenant.id);
+    if (idx >= 0) {
+      this.tenants[idx] = tenant;
+    } else {
+      this.tenants.push(tenant);
+    }
+    this.saveState();
+    this.notify();
+    return tenant;
+  }
+
+  public async getAuthAccessToken(): Promise<string | null> {
+    const client = this.supabaseClient;
+    if (!client) return null;
+    try {
+      const { data } = await client.auth.getSession();
+      return data.session?.access_token ?? null;
+    } catch {
+      return null;
     }
   }
 

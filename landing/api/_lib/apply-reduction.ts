@@ -178,7 +178,10 @@ async function applyPatches(
   }
 
   if (reduction.subscriptionAction === 'create' && reduction.subscriptionPatch !== null) {
-    await insertRow(config, 'subscriptions', reduction.subscriptionPatch);
+    await insertRow(config, 'subscriptions', {
+      billing_interval: 'one_time',
+      ...reduction.subscriptionPatch,
+    });
   } else if (
     reduction.subscriptionAction === 'update' &&
     reduction.subscriptionPatch !== null &&
@@ -189,6 +192,34 @@ async function applyPatches(
       'subscriptions',
       `id=eq.${escapeEq(context.subscription.id)}`,
       reduction.subscriptionPatch,
+    );
+  }
+
+  // Activate/extend the linked SamTill POS shop (`public.tenants`) when an
+  // entitlement window was just granted or renewed.
+  if (
+    context.order?.tenant_id &&
+    reduction.entitlementPatch?.valid_to &&
+    reduction.entitlementAction !== 'none'
+  ) {
+    const startedAt =
+      reduction.entitlementPatch.valid_from ??
+      context.entitlement?.valid_from ??
+      context.subscription?.current_period_start ??
+      new Date().toISOString();
+
+    await updateRows(
+      config,
+      'tenants',
+      `id=eq.${escapeEq(context.order.tenant_id)}`,
+      {
+        is_active: true,
+        subscription_status: 'active',
+        subscription_plan_code: reduction.entitlementPatch.plan_code ?? context.order.plan_code,
+        subscription_started_at: startedAt,
+        subscription_expires_at: reduction.entitlementPatch.valid_to,
+        last_payment_reference: context.order.reference,
+      },
     );
   }
 

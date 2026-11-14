@@ -1,4 +1,4 @@
-import {useEffect, useState, type ChangeEvent, type FormEvent} from 'react';
+import {useEffect, useRef, useState, type ChangeEvent, type FormEvent} from 'react';
 import AccountShell from '../components/account/AccountShell';
 import GateNotice from '../components/account/GateNotice';
 import StatusBanner, {type BannerTone} from '../components/account/StatusBanner';
@@ -9,17 +9,13 @@ import {resendConfirmation, signInToAccount} from '../lib/authFlow';
 import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
 import {nextRouteAfterSignIn, type ParsedRoute} from '../lib/hashRoute';
 import {navigateTo} from '../lib/navigation';
+import {ensureProvisionedShop} from '../lib/shopProvisioning';
 import {createAuthProvider} from '../lib/supabaseAdapter';
 import {useAccountSession} from '../lib/useAccountSession';
 import {hasErrors, validateSignIn, type FieldErrors} from '../lib/validation';
 
 /**
- * Sign-in for customer accounts.
- *
- * Loading, error and success states are explicit; an unverified customer is
- * told plainly that verification is still required (in the recommended
- * configuration the provider refuses the session until the address is
- * confirmed, and we never claim otherwise).
+ * Sign-in for customer and business owner accounts.
  */
 
 export default function LoginPage({route}: {route: ParsedRoute}) {
@@ -30,18 +26,28 @@ export default function LoginPage({route}: {route: ParsedRoute}) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [banner, setBanner] = useState<{tone: BannerTone; message: string} | null>(null);
-  // Set when sign-in failed specifically because the address is unconfirmed,
-  // so the screen can offer a one-click "resend the link" action instead of
-  // leaving the customer stuck at a dead end.
   const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const routingRef = useRef(false);
 
-  // Already signed in (or just signed in) → go to the requested screen.
+  const next = route.params.get('next');
+
+  // Already signed in (or just signed in) -> ensure owner shop provisioned, then go to next route.
   useEffect(() => {
-    if (!loading && account) {
-      navigateTo(nextRouteAfterSignIn(route.params));
+    if (loading || !account || routingRef.current) return;
+    routingRef.current = true;
+    const client = getCommerceAuth();
+    const destination = nextRouteAfterSignIn(route.params);
+    if (!client) {
+      navigateTo(destination);
+      return;
     }
-  }, [loading, account, route.params]);
+    void ensureProvisionedShop(client, {}, {createFallbackIfMissing: next === 'checkout'})
+      .catch(() => ({ok: true}))
+      .finally(() => {
+        navigateTo(destination);
+      });
+  }, [loading, account, route.params, next]);
 
   if (!availability.available) {
     return (
@@ -69,7 +75,10 @@ export default function LoginPage({route}: {route: ParsedRoute}) {
 
     const client = getCommerceAuth();
     if (!client) {
-      setBanner({tone: 'error', message: 'The account service is not configured on this site yet.'});
+      setBanner({
+        tone: 'error',
+        message: 'The customer account service is not configured for this deployment yet.',
+      });
       return;
     }
 
@@ -90,14 +99,16 @@ export default function LoginPage({route}: {route: ParsedRoute}) {
     }
     if (result.status === 'error') {
       setBanner({tone: 'error', message: result.message});
-      // Offer a resend only when the provider explicitly said the address is
-      // unconfirmed — never guess from a generic failure.
       if (result.kind === 'email_not_confirmed') setUnverifiedEmail(email.trim());
       return;
     }
-    // Signed in — useAccountSession picks the session up and the effect above
-    // navigates to the requested screen.
-    setBanner({tone: 'success', message: 'Signed in. Taking you to your account…'});
+    setBanner({
+      tone: 'success',
+      message:
+        next === 'checkout'
+          ? 'Signed in. Opening your 6-Month Subscription checkout…'
+          : 'Signed in. Taking you to your account…',
+    });
   }
 
   async function handleResend() {
@@ -106,8 +117,11 @@ export default function LoginPage({route}: {route: ParsedRoute}) {
     if (!client) return;
 
     setResendState('sending');
+    const redirectTo = next
+      ? `${window.location.origin}/#/verify?next=${encodeURIComponent(next)}`
+      : `${window.location.origin}/#/verify`;
     const result = await resendConfirmation(createAuthProvider(client), unverifiedEmail, {
-      redirectTo: `${window.location.origin}/#/verify`,
+      redirectTo,
     });
 
     if (result.status === 'sent') {

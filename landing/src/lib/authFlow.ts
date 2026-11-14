@@ -20,6 +20,7 @@ import {
   validateNewPassword,
   validatePassword,
   validateRegistration,
+  validateShopName,
   validateSignIn,
   type FieldErrors,
 } from './validation.ts';
@@ -219,19 +220,29 @@ export type RegisterOutcome =
 export async function registerAccount(
   provider: AuthProvider,
   input: RegistrationInputLike,
-  options: {emailRedirectTo?: string} = {},
+  options: {emailRedirectTo?: string; requireShopName?: boolean} = {},
 ): Promise<RegisterOutcome> {
   const errors = validateRegistration(input);
+  if (options.requireShopName) {
+    const shopError = validateShopName(input.shopName ?? '');
+    if (shopError) errors.shopName = shopError;
+  }
   if (Object.keys(errors).length > 0) {
     return {status: 'invalid_input', errors};
   }
 
   let response;
   try {
+    const metadata: Record<string, unknown> = {
+      full_name: input.fullName.trim(),
+      ...(input.phone.trim() ? {phone: input.phone.trim()} : {}),
+      ...(input.shopName?.trim() ? {shop_name: input.shopName.trim()} : {}),
+      ...(input.shopAddress?.trim() ? {shop_address: input.shopAddress.trim()} : {}),
+    };
     response = await provider.signUp({
       email: input.email.trim(),
       password: input.password,
-      data: {full_name: input.fullName.trim(), ...(input.phone.trim() ? {phone: input.phone.trim()} : {})},
+      data: metadata,
       options: options.emailRedirectTo ? {emailRedirectTo: options.emailRedirectTo} : undefined,
     });
   } catch {
@@ -271,6 +282,8 @@ export interface RegistrationInputLike {
   password: string;
   fullName: string;
   phone: string;
+  shopName?: string;
+  shopAddress?: string;
 }
 
 export type SignInOutcome =

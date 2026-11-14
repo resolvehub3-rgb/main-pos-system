@@ -8,10 +8,13 @@ import {checkoutAvailability} from '../lib/availability';
 import {readCommerceEnv} from '../lib/commerceClient';
 import {
   checkoutFailureMessage,
+  fetchMyAccess,
   fetchPublishedPlans,
   formatMinorAmount,
+  hasActiveSubscriptionAccess,
   startCheckout,
   verifyWithBackoff,
+  type AccessResult,
   type CheckoutFailure,
   type PlansFailure,
   type PublishedPlan,
@@ -72,6 +75,7 @@ export default function CheckoutPage() {
   const planParam = route.params.get('plan') ?? '';
 
   const [plansState, setPlansState] = useState<PlansState>({status: 'loading'});
+  const [accessState, setAccessState] = useState<AccessResult | null>(null);
   const [selected, setSelected] = useState<string>(SUBSCRIPTION_PLAN.id);
   const [starting, setStarting] = useState(false);
   const [startFailure, setStartFailure] = useState<CheckoutFailure | null>(null);
@@ -106,6 +110,21 @@ export default function CheckoutPage() {
     });
   }, [apiBase, availability.available]);
 
+  // Check if signed-in customer already holds an active subscription.
+  useEffect(() => {
+    if (!account || reference) {
+      setAccessState(null);
+      return;
+    }
+    let active = true;
+    void fetchMyAccess({apiBase, accessToken: account.accessToken}).then((result) => {
+      if (active) setAccessState(result);
+    });
+    return () => {
+      active = false;
+    };
+  }, [account, apiBase, reference]);
+
   // Returning from Paystack: verify the reference with backoff until verified or definitively settled.
   useEffect(() => {
     if (!reference || !account || verifyState.status !== 'idle') return;
@@ -134,6 +153,10 @@ export default function CheckoutPage() {
       window.sessionStorage.setItem(PLAN_KEY, result.plan.code);
       window.location.assign(result.authorizationUrl);
       return;
+    }
+    if (result.kind === 'already_subscribed') {
+      const refreshed = await fetchMyAccess({apiBase, accessToken: account.accessToken});
+      setAccessState(refreshed);
     }
     setStartFailure(result);
     setStarting(false);
@@ -297,7 +320,7 @@ export default function CheckoutPage() {
           </dl>
 
           <a
-            href="/app/login"
+            href="/app/dashboard"
             className="mt-5 block w-full rounded-full bg-amber-700 px-6 py-3.5 text-center text-sm font-bold text-white transition-colors hover:bg-amber-800"
           >
             Open SamTill POS →
@@ -416,10 +439,72 @@ export default function CheckoutPage() {
         </dl>
 
         <GateNotice
-          notice="Sign in to your SamTill account to proceed to secure Paystack payment and link your 6-Month Subscription."
-          actionHref={loginHref('/checkout')}
-          actionLabel="Sign in to pay"
+          notice="Sign in to your SamTill account (or register your business) to proceed to secure Paystack payment."
+          actionHref="#/register?next=checkout"
+          actionLabel="Create account to pay"
         />
+        <p className="mt-4 text-center text-sm text-navy-700">
+          Already registered?{' '}
+          <a href={loginHref('/checkout')} className="font-bold text-amber-700 underline-offset-4 hover:underline">
+            Sign in →
+          </a>
+        </p>
+      </AccountShell>
+    );
+  }
+
+  // ---- already actively subscribed ---------------------------------------
+
+  const activeSubscription =
+    accessState?.ok ? hasActiveSubscriptionAccess(accessState) : null;
+  if (activeSubscription?.active && accessState?.ok) {
+    return (
+      <AccountShell
+        title="Subscription already active"
+        subtitle={`${SUBSCRIPTION_PLAN.productName} — ${SUBSCRIPTION_PLAN.name}`}
+        footer={
+          <a href="#/account" className="font-semibold text-navy-700 underline-offset-4 hover:underline">
+            View my account →
+          </a>
+        }
+      >
+        <StatusBanner tone="success">
+          Your {SUBSCRIPTION_PLAN.productName} 6-Month Subscription is already active
+          {accessState.tenant?.name ? ` for ${accessState.tenant.name}` : ''}. No additional payment
+          is required right now.
+        </StatusBanner>
+
+        <dl className="mt-5 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm">
+          {accessState.tenant?.name && (
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="font-bold text-navy-900">Shop / Store</dt>
+              <dd className="text-navy-700">{accessState.tenant.name}</dd>
+            </div>
+          )}
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="font-bold text-navy-900">Subscription</dt>
+            <dd className="text-navy-700">{SUBSCRIPTION_PLAN.name}</dd>
+          </div>
+          {activeSubscription.validFrom && (
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="font-bold text-navy-900">Start date</dt>
+              <dd className="text-navy-700">{formatDisplayDate(activeSubscription.validFrom)}</dd>
+            </div>
+          )}
+          {activeSubscription.validTo && (
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="font-bold text-navy-900">Expiry date</dt>
+              <dd className="font-bold text-emerald-800">{formatDisplayDate(activeSubscription.validTo)}</dd>
+            </div>
+          )}
+        </dl>
+
+        <a
+          href="/app/dashboard"
+          className="mt-6 block w-full rounded-full bg-amber-700 px-6 py-3.5 text-center text-sm font-bold text-white transition-colors hover:bg-amber-800"
+        >
+          Open SamTill POS →
+        </a>
       </AccountShell>
     );
   }

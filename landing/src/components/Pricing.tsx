@@ -4,8 +4,10 @@ import {SUBSCRIPTION_PLAN, SUBSCRIPTION_TERMS} from '../config/pricing';
 import {checkoutAvailability} from '../lib/availability';
 import {
   checkoutFailureMessage,
+  fetchMyAccess,
   fetchPublishedPlans,
   formatMinorAmount,
+  hasActiveSubscriptionAccess,
   startCheckout,
   type PublishedPlan,
 } from '../lib/checkoutClient';
@@ -72,23 +74,42 @@ export default function Pricing({isStandalonePage = false}: PricingProps) {
       // Ignore storage access errors in locked-down browsers.
     }
 
-    if (checkout.available && account) {
-      setPaying(true);
-      const result = await startCheckout({
-        apiBase: env.apiBase,
-        accessToken: account.accessToken,
-        planCode: publishedPlan?.code ?? SUBSCRIPTION_PLAN.id,
-      });
-      if (result.ok) {
-        window.location.assign(result.authorizationUrl);
-        return;
-      }
-      setPaying(false);
-      setPayError(result.message || checkoutFailureMessage(result.kind));
+    if (!account) {
+      navigateTo('/register?next=checkout');
       return;
     }
 
-    navigateTo(`/checkout?plan=${SUBSCRIPTION_PLAN.id}`);
+    if (!checkout.available) {
+      navigateTo(`/checkout?plan=${SUBSCRIPTION_PLAN.id}`);
+      return;
+    }
+
+    setPaying(true);
+    const access = await fetchMyAccess({
+      apiBase: env.apiBase,
+      accessToken: account.accessToken,
+    });
+    if (access.ok && hasActiveSubscriptionAccess(access).active) {
+      setPaying(false);
+      navigateTo(`/checkout?plan=${SUBSCRIPTION_PLAN.id}`);
+      return;
+    }
+
+    const result = await startCheckout({
+      apiBase: env.apiBase,
+      accessToken: account.accessToken,
+      planCode: publishedPlan?.code ?? SUBSCRIPTION_PLAN.id,
+    });
+    if (result.ok) {
+      window.location.assign(result.authorizationUrl);
+      return;
+    }
+    setPaying(false);
+    if (result.kind === 'already_subscribed') {
+      navigateTo(`/checkout?plan=${SUBSCRIPTION_PLAN.id}`);
+      return;
+    }
+    setPayError(result.message || checkoutFailureMessage(result.kind));
   }
 
   const SectionHeading = isStandalonePage ? 'h1' : 'h2';

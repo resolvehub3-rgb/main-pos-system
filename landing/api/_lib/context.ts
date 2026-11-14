@@ -24,6 +24,7 @@ export interface OrderRow {
   id: string;
   reference: string;
   user_id: string;
+  tenant_id: string | null;
   plan_code: string;
   amount_minor: number;
   currency: string;
@@ -35,6 +36,7 @@ export interface OrderRow {
 export interface EntitlementRowFull {
   id: string;
   user_id: string;
+  tenant_id: string | null;
   product_code: string;
   plan_code: string | null;
   source_order_id: string | null;
@@ -45,8 +47,9 @@ export interface EntitlementRowFull {
 
 export interface SubscriptionRowFull {
   id: string;
-  user_id: string;
-  plan_code: string;
+  user_id: string | null;
+  tenant_id: string | null;
+  plan_code: string | null;
   paystack_subscription_code: string | null;
   status: 'active' | 'attention' | 'non_renewing' | 'cancelled' | 'completed';
   auto_renew: boolean;
@@ -54,6 +57,22 @@ export interface SubscriptionRowFull {
   current_period_end: string | null;
   cancel_at_period_end: boolean;
   cancelled_at: string | null;
+}
+
+export interface TenantMembershipRow {
+  tenant_id: string;
+  role: string;
+}
+
+export interface TenantBillingRow {
+  id: string;
+  name: string;
+  is_active: boolean;
+  subscription_status: string;
+  subscription_plan_code: string | null;
+  subscription_started_at: string | null;
+  subscription_expires_at: string | null;
+  last_payment_reference: string | null;
 }
 
 export interface PlanRowFull {
@@ -66,13 +85,41 @@ export interface ProfileRow {
   id: string;
 }
 
-const ORDER_COLUMNS = 'id,reference,user_id,plan_code,amount_minor,currency,status,paid_at,paystack_transaction_id';
-const ENTITLEMENT_COLUMNS = 'id,user_id,product_code,plan_code,source_order_id,status,valid_from,valid_to';
+const ORDER_COLUMNS =
+  'id,reference,user_id,tenant_id,plan_code,amount_minor,currency,status,paid_at,paystack_transaction_id';
+const ENTITLEMENT_COLUMNS =
+  'id,user_id,tenant_id,product_code,plan_code,source_order_id,status,valid_from,valid_to';
 const SUBSCRIPTION_COLUMNS =
-  'id,user_id,plan_code,paystack_subscription_code,status,auto_renew,current_period_start,current_period_end,cancel_at_period_end,cancelled_at';
+  'id,user_id,tenant_id,plan_code,paystack_subscription_code,status,auto_renew,current_period_start,current_period_end,cancel_at_period_end,cancelled_at';
+const TENANT_COLUMNS =
+  'id,name,is_active,subscription_status,subscription_plan_code,subscription_started_at,subscription_expires_at,last_payment_reference';
 
 function eq(value: string): string {
   return encodeURIComponent(value);
+}
+
+export async function loadActiveMembershipForUser(
+  config: CommerceConfig,
+  userId: string,
+): Promise<TenantMembershipRow | null> {
+  const rows = await selectRows<TenantMembershipRow>(
+    config,
+    'tenant_memberships',
+    `user_id=eq.${eq(userId)}&is_active=eq.true&select=tenant_id,role&order=created_at.asc&limit=1`,
+  );
+  return rows[0] ?? null;
+}
+
+export async function loadTenantById(
+  config: CommerceConfig,
+  tenantId: string,
+): Promise<TenantBillingRow | null> {
+  const rows = await selectRows<TenantBillingRow>(
+    config,
+    'tenants',
+    `id=eq.${eq(tenantId)}&select=${TENANT_COLUMNS}&limit=1`,
+  );
+  return rows[0] ?? null;
 }
 
 export async function loadOrder(
@@ -150,12 +197,19 @@ export async function loadReduceContext(
   keys: EventKeys,
   options: LoadContextOptions = {},
 ): Promise<ReduceContext> {
-  const order =
+  let order =
     options.order !== undefined
       ? options.order
       : keys.orderReference !== null
         ? await loadOrder(config, keys.orderReference)
         : null;
+
+  if (order && !order.tenant_id) {
+    const membership = await loadActiveMembershipForUser(config, order.user_id).catch(() => null);
+    if (membership) {
+      order = {...order, tenant_id: membership.tenant_id};
+    }
+  }
 
   const [plan, entitlement, subscription, profile] = await Promise.all([
     order !== null ? loadPlan(config, order.plan_code) : Promise.resolve(null),
@@ -183,8 +237,8 @@ export async function loadReduceContext(
   return {
     event,
     order,
-    entitlement,
-    subscription,
+    entitlement: entitlement as ReduceContext['entitlement'],
+    subscription: subscription as ReduceContext['subscription'],
     profile,
     plan,
     now: new Date(),

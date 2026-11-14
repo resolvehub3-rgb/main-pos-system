@@ -11,6 +11,8 @@ import { AddProductModal } from './components/AddProductModal';
 import { SupabaseConfigModal } from './components/SupabaseConfigModal';
 import { AuthPage } from './components/AuthPage';
 import { OfflineBanner } from './components/OfflineBanner';
+import { SubscriptionGate } from './components/SubscriptionGate';
+import { evaluateTenantAccess } from './lib/subscriptionGate';
 import { db } from './lib/supabaseClient';
 import {
   isTerminalPath,
@@ -159,26 +161,53 @@ export default function App() {
     }
   }, [currentUser]);
 
+  const [checkoutReturnRef, setCheckoutReturnRef] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') !== 'return') return null;
+    return params.get('reference') ?? params.get('trxref');
+  });
+
+  // Clean Paystack query string from /app/dashboard after capturing return reference.
+  useEffect(() => {
+    if (!checkoutReturnRef || typeof window === 'undefined') return;
+    window.history.replaceState({}, '', window.location.pathname);
+  }, [checkoutReturnRef]);
+
   // Retrieve current database records
   const tenants = db.getTenants();
   const sales = db.getSales();
   const products = db.getProducts();
-  const currentTenant: Tenant =
+  const matchedTenant =
     tenants.find((t) => t.id === selectedShopId) ||
-    tenants[0] || {
-      id: currentUser?.tenant_id || `tenant-${currentUser?.id || 'store-1'}`,
-      name: currentUser?.shop_name || 'My Supermarket Store',
-      slug: 'my-supermarket',
-      phone: currentUser?.phone || '',
-      email: currentUser?.email || '',
-      address: 'Accra, Ghana',
-      currency: 'GHS',
-      is_active: true,
-      subscription_status: 'active',
-      created_at: currentUser?.created_at || new Date().toISOString(),
-    };
-  const activeShift = db.getActiveShift(currentTenant.id);
+    tenants.find((t) => t.id === currentUser?.tenant_id) ||
+    tenants[0];
   const supabaseConfig = db.getConfig();
+  const currentTenant: Tenant = matchedTenant || {
+    id: currentUser?.tenant_id || `tenant-${currentUser?.id || 'store-1'}`,
+    name: currentUser?.shop_name || 'My Supermarket Store',
+    slug: 'my-supermarket',
+    phone: currentUser?.phone || '',
+    email: currentUser?.email || '',
+    address: 'Accra, Ghana',
+    currency: 'GHS',
+    is_active: true,
+    subscription_status: supabaseConfig.isConnected ? 'trial' : 'active',
+    created_at: currentUser?.created_at || new Date().toISOString(),
+  };
+  const activeShift = db.getActiveShift(currentTenant.id);
+
+  // Refresh tenant subscription status on mount/user change when connected to Supabase.
+  useEffect(() => {
+    if (!currentUser?.tenant_id || currentUser.role === 'super_admin' || !supabaseConfig.isConnected) {
+      return;
+    }
+    void db.refreshTenantBilling(currentUser.tenant_id);
+  }, [currentUser?.id, currentUser?.tenant_id, currentUser?.role, supabaseConfig.isConnected]);
+
+  const tenantAccess = currentUser
+    ? evaluateTenantAccess(currentUser, matchedTenant ?? currentTenant)
+    : null;
 
   // Cart totals for the customer display (same calculation the checkout panel
   // uses). Computed before the auth gate so the push below always has
@@ -642,69 +671,82 @@ export default function App() {
         </div>
       )}
 
-      {/* Main View Router based strictly on authenticated user's role */}
+      {/* Main View Router based strictly on authenticated user's role & active subscription */}
       <div className="flex-1">
-        {currentUser.role === 'super_admin' && (
-          <SuperAdminDashboard
-            tenants={tenants}
-            sales={sales}
-            products={products}
-            onAddShop={() => setShowAddProductModal(true)}
+        {tenantAccess && !tenantAccess.allowed ? (
+          <SubscriptionGate
+            user={currentUser}
+            tenant={currentTenant}
+            decision={tenantAccess}
+            checkoutReturnReference={checkoutReturnRef}
+            onClearCheckoutReturn={() => setCheckoutReturnRef(null)}
+            onLogout={handleLogout}
           />
-        )}
+        ) : (
+          <>
+            {currentUser.role === 'super_admin' && (
+              <SuperAdminDashboard
+                tenants={tenants}
+                sales={sales}
+                products={products}
+                onAddShop={() => setShowAddProductModal(true)}
+              />
+            )}
 
-        {currentUser.role === 'shop_owner' && (
-          shopOwnerViewingPOS ? (
-            <CashierPOS
-              currentTenant={currentTenant}
-              products={products.filter((p) => p.tenant_id === currentTenant.id)}
-              activeShift={activeShift}
-              pendingSignOut={pendingSignOut}
-              onCancelSignOut={() => setPendingSignOut(false)}
-              onCompleteSale={handleCompleteSale}
-              onPrintLastReceipt={(sale, opts) =>
-                setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
-              }
-              onOpenCustomerDisplay={openCustomerDisplay}
-              cart={cart}
-              setCart={setCart}
-            />
-          ) : (
-            <ShopOwnerDashboard
-              currentTenant={currentTenant}
-              currentUser={currentUser}
-              sales={sales}
-              products={products}
-              activeMenu={ownerMenu}
-              onMenuChange={(menu) => {
-                setOwnerMenu(menu);
-                pushPosPath(pathFromShopOwnerMenu(menu));
-              }}
-              onOpenAddProduct={() => setShowAddProductModal(true)}
-              onOpenPOS={() => {
-                setShopOwnerViewingPOS(true);
-                pushPosPath(POS_TERMINAL_PATH);
-              }}
-              onOpenCustomerDisplay={openCustomerDisplay}
-            />
-          )
-        )}
+            {currentUser.role === 'shop_owner' && (
+              shopOwnerViewingPOS ? (
+                <CashierPOS
+                  currentTenant={currentTenant}
+                  products={products.filter((p) => p.tenant_id === currentTenant.id)}
+                  activeShift={activeShift}
+                  pendingSignOut={pendingSignOut}
+                  onCancelSignOut={() => setPendingSignOut(false)}
+                  onCompleteSale={handleCompleteSale}
+                  onPrintLastReceipt={(sale, opts) =>
+                    setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
+                  }
+                  onOpenCustomerDisplay={openCustomerDisplay}
+                  cart={cart}
+                  setCart={setCart}
+                />
+              ) : (
+                <ShopOwnerDashboard
+                  currentTenant={currentTenant}
+                  currentUser={currentUser}
+                  sales={sales}
+                  products={products}
+                  activeMenu={ownerMenu}
+                  onMenuChange={(menu) => {
+                    setOwnerMenu(menu);
+                    pushPosPath(pathFromShopOwnerMenu(menu));
+                  }}
+                  onOpenAddProduct={() => setShowAddProductModal(true)}
+                  onOpenPOS={() => {
+                    setShopOwnerViewingPOS(true);
+                    pushPosPath(POS_TERMINAL_PATH);
+                  }}
+                  onOpenCustomerDisplay={openCustomerDisplay}
+                />
+              )
+            )}
 
-        {currentUser.role === 'cashier' && (
-          <CashierPOS
-            currentTenant={currentTenant}
-            products={products.filter((p) => p.tenant_id === currentTenant.id)}
-            activeShift={activeShift}
-            pendingSignOut={pendingSignOut}
-            onCancelSignOut={() => setPendingSignOut(false)}
-            onCompleteSale={handleCompleteSale}
-            onPrintLastReceipt={(sale, opts) =>
-              setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
-            }
-            onOpenCustomerDisplay={openCustomerDisplay}
-            cart={cart}
-            setCart={setCart}
-          />
+            {currentUser.role === 'cashier' && (
+              <CashierPOS
+                currentTenant={currentTenant}
+                products={products.filter((p) => p.tenant_id === currentTenant.id)}
+                activeShift={activeShift}
+                pendingSignOut={pendingSignOut}
+                onCancelSignOut={() => setPendingSignOut(false)}
+                onCompleteSale={handleCompleteSale}
+                onPrintLastReceipt={(sale, opts) =>
+                  setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
+                }
+                onOpenCustomerDisplay={openCustomerDisplay}
+                cart={cart}
+                setCart={setCart}
+              />
+            )}
+          </>
         )}
       </div>
 
