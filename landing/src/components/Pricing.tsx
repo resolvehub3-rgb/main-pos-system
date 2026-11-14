@@ -166,7 +166,17 @@ export default function Pricing() {
                 )}
 
                 <a
-                  href={canBuy(pkg.id) ? `#/checkout?plan=${pkg.id}` : '#contact'}
+                  href={canBuy(pkg.id) ? `#/checkout?plan=${pkg.id}` : '/contact'}
+                  onClick={(event) => {
+                    if (!canBuy(pkg.id)) {
+                      event.preventDefault();
+                      if (typeof window !== 'undefined') {
+                        window.history.pushState({}, '', '/contact');
+                        window.dispatchEvent(new PopStateEvent('popstate'));
+                        window.scrollTo({top: 0, behavior: 'smooth'});
+                      }
+                    }
+                  }}
                   className={`mt-8 inline-flex items-center justify-center rounded-full px-6 py-3.5 text-sm font-bold transition-colors ${
                     pkg.highlighted
                       ? 'bg-amber-700 text-white hover:bg-amber-800'

@@ -12,7 +12,18 @@ import { SupabaseConfigModal } from './components/SupabaseConfigModal';
 import { AuthPage } from './components/AuthPage';
 import { OfflineBanner } from './components/OfflineBanner';
 import { db } from './lib/supabaseClient';
-import { syncAuthUrl } from './lib/roleRoute';
+import {
+  isTerminalPath,
+  normalizePathname,
+  pathFromShopOwnerMenu,
+  POS_DASHBOARD_PATH,
+  POS_REGISTER_PATH,
+  POS_TERMINAL_PATH,
+  pushPosPath,
+  shopOwnerMenuFromPath,
+  syncAuthUrl,
+  type ShopOwnerMenu,
+} from './lib/roleRoute';
 import { UserAccount, CartItem, Sale, Product, Tenant, CustomerDisplayPayment } from './types';
 import { calculateCartTotals } from './lib/money';
 import { buildCustomerDisplayState } from './lib/customerDisplay';
@@ -41,7 +52,12 @@ export default function App() {
   // Authentication & Current User Session
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => db.getCurrentUser());
   const [selectedShopId, setSelectedShopId] = useState<string>('tenant-accra-mall');
-  const [shopOwnerViewingPOS, setShopOwnerViewingPOS] = useState<boolean>(false);
+  const [shopOwnerViewingPOS, setShopOwnerViewingPOS] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? isTerminalPath(window.location.pathname) : false
+  );
+  const [ownerMenu, setOwnerMenu] = useState<ShopOwnerMenu>(() =>
+    typeof window !== 'undefined' ? shopOwnerMenuFromPath(window.location.pathname) : 'overview'
+  );
   const [, setTick] = useState<number>(0);
 
   // Modals state
@@ -96,25 +112,51 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Subscribe to real database updates
+  // Subscribe to real database updates (including remote/expired sign-outs)
   useEffect(() => {
     const unsubscribe = db.subscribe(() => {
       setTick((t) => t + 1);
-      // Keep currentUser state in sync with database if updated
       const current = db.getCurrentUser();
-      if (current && (!currentUser || current.id !== currentUser.id || current.role !== currentUser.role)) {
+      if (!current && currentUser) {
+        setCurrentUser(null);
+        setShopOwnerViewingPOS(false);
+        setPendingSignOut(false);
+      } else if (current && (!currentUser || current.id !== currentUser.id || current.role !== currentUser.role)) {
         setCurrentUser(current);
       }
     });
     return () => unsubscribe();
   }, [currentUser]);
 
-  // The address bar must show the signed-in role's own URL, never the auth
-  // page the operator happened to arrive on. Sign-in, session restore, a
-  // role change pushed over realtime and logout all pass through this state,
-  // so one effect covers every transition (see src/lib/roleRoute.ts).
+  // Synchronize browser history (Back/Forward) with POS sub-routes under /app/*
+  useEffect(() => {
+    const onPopState = () => {
+      const path = window.location.pathname;
+      if (currentUser?.role === 'shop_owner') {
+        if (isTerminalPath(path)) {
+          setShopOwnerViewingPOS(true);
+        } else {
+          setShopOwnerViewingPOS(false);
+          setOwnerMenu(shopOwnerMenuFromPath(path));
+        }
+      }
+      syncAuthUrl(currentUser);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [currentUser]);
+
+  // Keep the address bar in sync with authentication and /app/ namespace rules.
   useEffect(() => {
     syncAuthUrl(currentUser);
+    if (currentUser?.role === 'shop_owner' && typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      if (isTerminalPath(path)) {
+        setShopOwnerViewingPOS(true);
+      } else {
+        setOwnerMenu(shopOwnerMenuFromPath(path));
+      }
+    }
   }, [currentUser]);
 
   // Retrieve current database records
@@ -316,13 +358,13 @@ export default function App() {
     // The active-cart recovery copy belongs to this signed-in session only —
     // drop it on sign-out so it can never surface for a later operator.
     if (currentUser?.tenant_id) clearActiveCart(currentUser.tenant_id, currentUser.id);
-    db.logout();
-    // Rewrite the URL to /login *before* clearing the user, so the auth page
-    // mounts on the Login tab. Without this the tab could fall back to
-    // Register for anyone whose first visit was the /register deep link.
+    void db.logout();
+    // Rewrite the URL to /app/login *before* clearing the user, so the auth
+    // page mounts on the Login tab and never returns to the marketing site.
     syncAuthUrl(null);
     setCurrentUser(null);
     setShopOwnerViewingPOS(false);
+    setOwnerMenu('overview');
     setPendingSignOut(false);
   };
 
@@ -518,10 +560,10 @@ export default function App() {
   // handleLogout → syncAuthUrl), so Register only appears for an explicit
   // /register deep link.
   if (!currentUser) {
+    const pathname =
+      typeof window !== 'undefined' ? normalizePathname(window.location.pathname) : '';
     const authTab: 'login' | 'register' =
-      typeof window !== 'undefined' && window.location.pathname === '/register'
-        ? 'register'
-        : 'login';
+      pathname === POS_REGISTER_PATH || pathname === '/register' ? 'register' : 'login';
     return (
       <AuthPage
         initialTab={authTab}
@@ -588,7 +630,10 @@ export default function App() {
             <span>Store Owner Till Testing Mode &bull; {currentTenant.name}</span>
           </div>
           <button
-            onClick={() => setShopOwnerViewingPOS(false)}
+            onClick={() => {
+              setShopOwnerViewingPOS(false);
+              pushPosPath(pathFromShopOwnerMenu(ownerMenu));
+            }}
             className="flex items-center gap-1.5 px-3 py-1 bg-[#F28C28] hover:bg-orange-600 text-white rounded-lg transition font-bold"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
@@ -630,8 +675,16 @@ export default function App() {
               currentUser={currentUser}
               sales={sales}
               products={products}
+              activeMenu={ownerMenu}
+              onMenuChange={(menu) => {
+                setOwnerMenu(menu);
+                pushPosPath(pathFromShopOwnerMenu(menu));
+              }}
               onOpenAddProduct={() => setShowAddProductModal(true)}
-              onOpenPOS={() => setShopOwnerViewingPOS(true)}
+              onOpenPOS={() => {
+                setShopOwnerViewingPOS(true);
+                pushPosPath(POS_TERMINAL_PATH);
+              }}
               onOpenCustomerDisplay={openCustomerDisplay}
             />
           )

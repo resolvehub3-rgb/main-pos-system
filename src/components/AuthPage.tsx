@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Lock,
   Mail,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { UserAccount } from '../types';
 import { db } from '../lib/supabaseClient';
+import { isStandalone } from '../lib/pwa';
 
 interface AuthPageProps {
   initialTab?: 'login' | 'register';
@@ -22,6 +23,11 @@ interface AuthPageProps {
 
 export const AuthPage: React.FC<AuthPageProps> = ({ initialTab = 'login', onLoginSuccess }) => {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>(initialTab);
+  const standalone = isStandalone();
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -145,12 +151,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialTab = 'login', onLogi
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               <span>Works online and offline</span>
             </div>
-            <a
-              href="/"
-              className="text-xs font-bold text-orange-300 transition-colors hover:text-orange-200"
-            >
-              ← Back to home
-            </a>
+            {!standalone && (
+              <a
+                href="/"
+                className="text-xs font-bold text-orange-300 transition-colors hover:text-orange-200"
+              >
+                ← Back to website
+              </a>
+            )}
           </div>
         </div>
       </header>

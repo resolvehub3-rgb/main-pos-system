@@ -447,7 +447,7 @@ test('updateProduct refuses to reassign a barcode another product already holds'
     is_active: true,
   });
 
-  // B may keep (or re-set) its own barcode — that is not a conflict.
+  // B may keep (or re-set) its own barcode ï¿½ that is not a conflict.
   assert.equal(db.updateProduct(b.id, { barcode: '6002020202022' }), true);
 
   // B may not take A's barcode.

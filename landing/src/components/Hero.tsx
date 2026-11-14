@@ -1,6 +1,18 @@
 import {Reveal} from './Reveal';
+import SmartInstallControl from './SmartInstallControl';
+import {navigateMarketing} from '../lib/marketingRoute';
 
-export default function Hero() {
+interface HeroProps {
+  onNavigate?: (path: string) => void;
+}
+
+export default function Hero({onNavigate}: HeroProps) {
+  const go = (event: React.MouseEvent<HTMLAnchorElement>, path: string) => {
+    event.preventDefault();
+    if (onNavigate) onNavigate(path);
+    else navigateMarketing(path);
+  };
+
   return (
     <section id="top" className="relative overflow-hidden bg-navy-950">
       {/* Subtle radial glow — decorative only. */}
@@ -37,17 +49,29 @@ export default function Hero() {
           <Reveal delayMs={240}>
             <div className="mt-9 flex flex-col gap-4 sm:flex-row">
               <a
-                href="#pricing"
+                href="/app/login"
                 className="inline-flex items-center justify-center rounded-full bg-amber-700 px-8 py-4 text-base font-bold text-white shadow-lg shadow-amber-700/30 transition-colors hover:bg-amber-800"
+              >
+                Login to POS
+              </a>
+              <a
+                href="/pricing"
+                onClick={(event) => go(event, '/pricing')}
+                className="inline-flex items-center justify-center rounded-full border-2 border-navy-500 px-8 py-4 text-base font-bold text-white transition-colors hover:border-amber-400 hover:text-amber-400"
               >
                 View packages
               </a>
               <a
-                href="#contact"
-                className="inline-flex items-center justify-center rounded-full border-2 border-navy-500 px-8 py-4 text-base font-bold text-white transition-colors hover:border-amber-400 hover:text-amber-400"
+                href="/contact"
+                onClick={(event) => go(event, '/contact')}
+                className="inline-flex items-center justify-center rounded-full border border-navy-700 px-6 py-4 text-sm font-bold text-navy-100 transition-colors hover:border-amber-400 hover:text-amber-300"
               >
-                Contact the business
+                Contact
               </a>
+            </div>
+
+            <div className="mt-6">
+              <SmartInstallControl variant="hero" onNavigate={onNavigate} />
             </div>
           </Reveal>
 

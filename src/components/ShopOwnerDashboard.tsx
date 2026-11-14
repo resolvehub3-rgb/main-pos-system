@@ -70,6 +70,7 @@ import { StockBookView } from './StockBookView';
 import { EditProductModal } from './EditProductModal';
 import { estimateStockDays, effectiveUnitCost, MOVEMENT_TYPE_LABELS, movementDelta } from '../lib/stockBook';
 import { canAdjustStock } from '../lib/permissions';
+import type { ShopOwnerMenu } from '../lib/roleRoute';
 
 interface ShopOwnerDashboardProps {
   currentTenant: Tenant;
@@ -81,6 +82,8 @@ interface ShopOwnerDashboardProps {
   currentUser: UserAccount;
   sales: Sale[];
   products: Product[];
+  activeMenu?: ShopOwnerMenu;
+  onMenuChange?: (menu: ShopOwnerMenu) => void;
   onOpenAddProduct: () => void;
   onOpenPOS: () => void;
   /** Open / reopen the customer display window from Dual-Screen Setup. */
@@ -104,23 +107,18 @@ export const ShopOwnerDashboard: React.FC<ShopOwnerDashboardProps> = ({
   currentUser,
   sales,
   products,
+  activeMenu: controlledMenu,
+  onMenuChange,
   onOpenAddProduct,
   onOpenPOS,
   onOpenCustomerDisplay,
 }) => {
-  const [activeMenu, setActiveMenu] = useState<
-    | 'overview'
-    | 'sales'
-    | 'inventory'
-    | 'products'
-    | 'stockbook'
-    | 'categories'
-    | 'customers'
-    | 'staff'
-    | 'expenses'
-    | 'reports'
-    | 'settings'
-  >('overview');
+  const [internalMenu, setInternalMenu] = useState<ShopOwnerMenu>('overview');
+  const activeMenu = controlledMenu ?? internalMenu;
+  const setActiveMenu = (menu: ShopOwnerMenu) => {
+    setInternalMenu(menu);
+    onMenuChange?.(menu);
+  };
 
   const [searchQuery, setSearchQuery] = useState('');
 

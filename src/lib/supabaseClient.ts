@@ -269,6 +269,35 @@ class DatabaseService {
    * fall back to the clean baseline.
    */
   private handleStorageEvent = (event: StorageEvent): void => {
+    if (event.key === STORAGE_KEY_SESSION) {
+      if (!event.newValue && this.currentUser) {
+        this.currentUser = null;
+        this.listeners.forEach((listener) => {
+          try {
+            listener();
+          } catch (err) {
+            console.error('Error in database subscriber:', err);
+          }
+        });
+      } else if (event.newValue) {
+        try {
+          const nextUser = JSON.parse(event.newValue) as UserAccount;
+          if (!this.currentUser || this.currentUser.id !== nextUser.id || this.currentUser.role !== nextUser.role) {
+            this.currentUser = nextUser;
+            this.listeners.forEach((listener) => {
+              try {
+                listener();
+              } catch (err) {
+                console.error('Error in database subscriber:', err);
+              }
+            });
+          }
+        } catch {
+          // Ignore malformed session payload
+        }
+      }
+      return;
+    }
     if (event.key !== null && event.key !== STORAGE_KEY_DATA) return;
     this.applyStoredData(event.newValue);
     this.listeners.forEach((listener) => {
@@ -475,6 +504,18 @@ class DatabaseService {
       case 'INITIAL_SESSION':
       case 'SIGNED_IN':
       case 'TOKEN_REFRESHED': {
+        if (event === 'INITIAL_SESSION' && !session?.user && this.currentUser) {
+          // If Supabase reports no persisted/valid initial session while a
+          // client is active and no offline sb-pos-auth token remains (or
+          // refresh failed), clear the stale cached user so protected /app/*
+          // routes require a fresh sign-in.
+          const hasStoredAuth =
+            typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('sb-pos-auth'));
+          if (!hasStoredAuth || (typeof navigator !== 'undefined' && navigator.onLine !== false)) {
+            this.setCurrentUser(null);
+            break;
+          }
+        }
         // Restore the application user only when one is not already loaded, so
         // a token refresh does not clobber an active in-memory session.
         if (!this.currentUser && session?.user) {
@@ -2565,6 +2606,13 @@ class DatabaseService {
    */
   public async logout(): Promise<void> {
     this.setCurrentUser(null);
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem('sb-pos-auth');
+      } catch {
+        // Ignore storage restrictions
+      }
+    }
     if (this.supabaseClient) {
       await signOutSupabase(this.supabaseClient as SupabaseAuthClient);
     }
