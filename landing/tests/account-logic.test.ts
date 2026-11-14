@@ -168,9 +168,9 @@ test('gates: registration form appears only when switched on AND configured', ()
   assertEqual(result.reason, 'available');
 });
 
-test('gates: shipped commerce flags — accounts open (approval-gated), payments still off', () => {
+test('gates: shipped commerce flags — accounts and Pay Now checkout enabled', () => {
   assertEqual(COMMERCE.accountEnabled, true, 'accountEnabled ships true (approval-gated)');
-  assertEqual(COMMERCE.paymentsEnabled, false, 'paymentsEnabled ships false');
+  assertEqual(COMMERCE.paymentsEnabled, true, 'paymentsEnabled ships true');
 });
 
 // ---------------------------------------------------------------------------

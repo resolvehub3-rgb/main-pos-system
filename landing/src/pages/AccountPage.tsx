@@ -3,7 +3,7 @@ import AccountShell from '../components/account/AccountShell';
 import GateNotice from '../components/account/GateNotice';
 import StatusBanner, {type BannerTone} from '../components/account/StatusBanner';
 import {COMMERCE} from '../config/commerce';
-import {PACKAGES} from '../config/pricing';
+import {SUBSCRIPTION_PLAN} from '../config/pricing';
 import {SITE} from '../config/site';
 import {accountAvailability, checkoutAvailability} from '../lib/availability';
 import {resendConfirmation} from '../lib/authFlow';
@@ -25,17 +25,14 @@ import {useAccountSession} from '../lib/useAccountSession';
 
 /**
  * Signed-in customer account screen: identity, email-verification status,
- * the licence this account holds, how to get the app, and sign-out.
- *
- * Verification status is read from the session the provider returned — the
- * screen never states that an address is verified unless the provider says
- * so (`email_confirmed_at` present). Licence state comes from the server's
- * own GET /api/subscription answer, never from anything the browser computed.
+ * the subscription this account holds, how to open the app, and sign-out.
  */
 
 function planLabel(planCode: string | null): string {
-  const match = planCode ? PACKAGES.find((pkg) => pkg.id === planCode) : undefined;
-  return match ? match.name : planCode ?? 'SamTill licence';
+  if (!planCode || planCode === SUBSCRIPTION_PLAN.id) {
+    return `${SUBSCRIPTION_PLAN.productName} — ${SUBSCRIPTION_PLAN.name}`;
+  }
+  return planCode;
 }
 
 export default function AccountPage() {
@@ -362,24 +359,25 @@ export default function AccountPage() {
 
       {access?.ok && (access.entitlements.length > 0 || checkout.available) && (
         <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-          <h2 className="text-sm font-bold text-navy-900">Your SamTill licence</h2>
+          <h2 className="text-sm font-bold text-navy-900">Your SamTill POS subscription</h2>
           {access.entitlements.length === 0 ? (
             <>
               <p className="mt-1 text-sm text-navy-700">
-                This account does not have a licence yet. Choose a package to buy one — your
-                licence appears here as soon as payment is confirmed.
+                This account does not have an active 6-Month Subscription yet. Activate for{' '}
+                {SUBSCRIPTION_PLAN.currency}
+                {SUBSCRIPTION_PLAN.price.toFixed(2)} — access starts immediately upon payment verification.
               </p>
               {checkout.available ? (
                 <button
                   type="button"
-                  onClick={() => navigateTo('/checkout')}
+                  onClick={() => navigateTo(`/checkout?plan=${SUBSCRIPTION_PLAN.id}`)}
                   className="mt-3 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
                 >
-                  Choose a package →
+                  Pay Now (GH₵500.00 / 6 Months) →
                 </button>
               ) : (
                 <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                  Packages are listed on the website; contact SamTeck Digital to purchase.
+                  Subscription pricing is listed on the Pricing page.
                 </p>
               )}
             </>
@@ -434,10 +432,10 @@ export default function AccountPage() {
             checkout.available && (
               <button
                 type="button"
-                onClick={() => navigateTo('/checkout')}
+                onClick={() => navigateTo(`/checkout?plan=${SUBSCRIPTION_PLAN.id}`)}
                 className="mt-4 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
               >
-                Renew or buy again →
+                Renew 6-Month Subscription (GH₵500.00) →
               </button>
             )}
         </div>

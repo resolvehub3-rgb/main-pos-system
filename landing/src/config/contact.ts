@@ -58,7 +58,7 @@ export const DEFAULT_ENQUIRY = [
   '',
   'Shop type:',
   'Location:',
-  'Preferred package (Starter / Business / Professional):',
+  'Subscription (SamTill POS — 6-Month Subscription):',
   'Best number to reach me on:',
   '',
   'Thank you.',

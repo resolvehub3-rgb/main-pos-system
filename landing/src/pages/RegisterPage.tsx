@@ -10,6 +10,8 @@ import {
   type RegisterOutcome,
 } from '../lib/authFlow';
 import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
+import {useHashRoute} from '../lib/useHashRoute';
+import {nextRouteAfterSignIn} from '../lib/hashRoute';
 import {navigateTo} from '../lib/navigation';
 import {createAuthProvider} from '../lib/supabaseAdapter';
 import {
@@ -24,18 +26,13 @@ import {
  *
  * Only the fields the commerce account model stores are collected: email,
  * password, full name, optional phone. A website account is NOT a POS shop,
- * tenant or licence — the page says so plainly.
- *
- * Outcomes (src/lib/authFlow.ts):
- * - `pending_verification` → "check your email" (the address is NOT yet
- *   claimed to be verified),
- * - `signed_in`            → provider did not require confirmation,
- * - `duplicate_email`      → clear guidance to sign in / reset instead.
+ * tenant or subscription — the page says so plainly.
  */
 
 const EMPTY: RegistrationInput = {email: '', password: '', fullName: '', phone: ''};
 
 export default function RegisterPage() {
+  const route = useHashRoute();
   const availability = accountAvailability(COMMERCE, readCommerceEnv());
   const [values, setValues] = useState<RegistrationInput>(EMPTY);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -98,7 +95,7 @@ export default function RegisterPage() {
         return;
       case 'signed_in':
         setBanner({tone: 'success', message: result.message});
-        window.setTimeout(() => navigateTo('/account'), 600);
+        window.setTimeout(() => navigateTo(nextRouteAfterSignIn(route.params)), 600);
         return;
       case 'duplicate_email':
         setBanner({tone: 'info', message: result.message});

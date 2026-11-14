@@ -59,7 +59,7 @@ export default function Hero({onNavigate}: HeroProps) {
                 onClick={(event) => go(event, '/pricing')}
                 className="inline-flex items-center justify-center rounded-full border-2 border-navy-500 px-8 py-4 text-base font-bold text-white transition-colors hover:border-amber-400 hover:text-amber-400"
               >
-                View packages
+                View pricing
               </a>
               <a
                 href="/contact"

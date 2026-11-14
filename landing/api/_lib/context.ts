@@ -168,7 +168,9 @@ export async function loadReduceContext(
           'subscriptions',
           `paystack_subscription_code=eq.${eq(keys.subscriptionCode)}&select=${SUBSCRIPTION_COLUMNS}&limit=1`,
         ).then((rows) => rows[0] ?? null)
-      : Promise.resolve(null),
+      : order !== null
+        ? loadSubscriptionForUser(config, order.user_id)
+        : Promise.resolve(null),
     keys.customerEmail !== null
       ? selectRows<ProfileRow>(
           config,

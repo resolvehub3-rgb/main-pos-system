@@ -35,7 +35,7 @@ const NOW = new Date('2026-06-15T12:00:00.000Z');
 // ---------------------------------------------------------------------------
 
 function makePlan(overrides: Partial<PlanState> = {}): PlanState {
-  return {code: 'business', interval_months: 6, entitlement_product: 'samtill-pos', ...overrides};
+  return {code: 'samtill-pos-6m', interval_months: 6, entitlement_product: 'samtill-pos', ...overrides};
 }
 
 function makeOrder(overrides: Partial<OrderState> = {}): OrderState {
@@ -43,8 +43,8 @@ function makeOrder(overrides: Partial<OrderState> = {}): OrderState {
     id: 'ord-0001',
     reference: 'st_abc123def456',
     user_id: 'user-1',
-    plan_code: 'business',
-    amount_minor: 89900, // GH₵899.00 in pesewas
+    plan_code: 'samtill-pos-6m',
+    amount_minor: 50000, // GH₵500.00 in pesewas
     currency: 'GHS',
     status: 'pending',
     paid_at: null,
@@ -58,7 +58,7 @@ function makeEntitlement(overrides: Partial<EntitlementState> = {}): Entitlement
     id: 'ent-0001',
     user_id: 'user-1',
     product_code: 'samtill-pos',
-    plan_code: 'business',
+    plan_code: 'samtill-pos-6m',
     source_order_id: 'ord-0000',
     status: 'active',
     valid_from: '2026-01-10T00:00:00.000Z',
@@ -71,7 +71,7 @@ function makeSubscription(overrides: Partial<SubscriptionState> = {}): Subscript
   return {
     id: 'sub-0001',
     user_id: 'user-1',
-    plan_code: 'business',
+    plan_code: 'samtill-pos-6m',
     paystack_subscription_code: 'sub_900',
     status: 'active',
     auto_renew: true,
@@ -89,10 +89,10 @@ function chargeSuccessEvent(overrides: Record<string, unknown> = {}): ProviderEv
     data: {
       id: 555001,
       reference: 'st_abc123def456',
-      amount: 89900,
+      amount: 50000,
       currency: 'GHS',
       paid_at: '2026-06-15T12:05:00.000Z',
-      metadata: {user_id: 'user-1', plan_code: 'business'},
+      metadata: {user_id: 'user-1', plan_code: 'samtill-pos-6m'},
       ...overrides,
     },
   };
@@ -114,7 +114,7 @@ function makeContext(overrides: Partial<ReduceContext> & {event: ProviderEvent})
 // reducer: first payment
 // ---------------------------------------------------------------------------
 
-test('first successful charge marks the order paid and creates an entitlement', () => {
+test('first successful charge marks the order paid and activates entitlement + 6-month subscription', () => {
   const reduction = reducePaystackEvent(makeContext({event: chargeSuccessEvent(), order: makeOrder()}));
 
   assertEqual(reduction.outcome, 'applied');
@@ -128,6 +128,13 @@ test('first successful charge marks the order paid and creates an entitlement', 
   // 6-month plan from "now"
   assertEqual(reduction.entitlementPatch?.valid_from, '2026-06-15T12:00:00.000Z');
   assertEqual(reduction.entitlementPatch?.valid_to, '2026-12-15T12:00:00.000Z');
+  // 6-month subscription record activated with start date and +6 calendar months expiry
+  assertEqual(reduction.subscriptionAction, 'create');
+  assertEqual(reduction.subscriptionPatch?.plan_code, 'samtill-pos-6m');
+  assertEqual(reduction.subscriptionPatch?.status, 'active');
+  assertEqual(reduction.subscriptionPatch?.auto_renew, false);
+  assertEqual(reduction.subscriptionPatch?.current_period_start, '2026-06-15T12:00:00.000Z');
+  assertEqual(reduction.subscriptionPatch?.current_period_end, '2026-12-15T12:00:00.000Z');
 });
 
 test('a second charge for an already-paid order is a duplicate (no double grant)', () => {
@@ -194,7 +201,12 @@ test('missing plan: payment recorded but entitlement deliberately not extended',
 
 test('renewal stacks onto the end of an active window (no gap, no shortening)', () => {
   const reduction = reducePaystackEvent(
-    makeContext({event: chargeSuccessEvent(), order: makeOrder(), entitlement: makeEntitlement()}),
+    makeContext({
+      event: chargeSuccessEvent(),
+      order: makeOrder(),
+      entitlement: makeEntitlement(),
+      subscription: makeSubscription({paystack_subscription_code: null, auto_renew: false}),
+    }),
   );
 
   assertEqual(reduction.outcome, 'applied');
@@ -204,6 +216,8 @@ test('renewal stacks onto the end of an active window (no gap, no shortening)', 
   // valid_from must stay untouched while reactivating an active row.
   assert(!('valid_from' in (reduction.entitlementPatch ?? {})), 'valid_from must not be reset on extension');
   assertEqual(reduction.entitlementPatch?.source_order_id, 'ord-0001');
+  assertEqual(reduction.subscriptionAction, 'update');
+  assertEqual(reduction.subscriptionPatch?.current_period_end, '2027-06-15T12:00:00.000Z');
 });
 
 test('a lapsed window restarts from now', () => {
@@ -320,12 +334,12 @@ test('subscription.create without a linkable user/plan is flagged, not guessed',
 test('subscription.create with profile+plan creates the row', () => {
   const event: ProviderEvent = {type: 'subscription.create', data: {subscription_code: 'sub_902', status: 'active'}};
   const reduction = reducePaystackEvent(
-    makeContext({event, profile: {id: 'user-7'}, plan: makePlan({code: 'starter'})}),
+    makeContext({event, profile: {id: 'user-7'}, plan: makePlan({code: 'samtill-pos-6m'})}),
   );
 
   assertEqual(reduction.subscriptionAction, 'create');
   assertEqual(reduction.subscriptionPatch?.user_id, 'user-7');
-  assertEqual(reduction.subscriptionPatch?.plan_code, 'starter');
+  assertEqual(reduction.subscriptionPatch?.plan_code, 'samtill-pos-6m');
 });
 
 test('unknown event types are ignored (never applied)', () => {
@@ -475,9 +489,9 @@ test('deny reasons map to audit result values', () => {
 
 const PLANS: PlanRow[] = [
   {
-    code: 'starter',
-    name: 'Starter',
-    amount_minor: 49900,
+    code: 'samtill-pos-6m',
+    name: 'SamTill POS — 6-Month Subscription',
+    amount_minor: 50000,
     currency: 'GHS',
     interval_months: 6,
     entitlement_product: 'samtill-pos',
@@ -495,19 +509,20 @@ const PLANS: PlanRow[] = [
 ];
 
 test('checkout resolves price from the server row, not the client', () => {
-  const resolution = resolveCheckoutPlan(PLANS, {planCode: 'starter'});
+  const resolution = resolveCheckoutPlan(PLANS, {planCode: 'samtill-pos-6m'});
   assert(resolution.ok, 'expected resolution to succeed');
-  assertEqual(resolution.plan.amount_minor, 49900);
+  assertEqual(resolution.plan.amount_minor, 50000);
   assertEqual(resolution.plan.currency, 'GHS');
+  assertEqual(resolution.plan.interval_months, 6);
 });
 
 test('any client-supplied price field is rejected outright', () => {
   for (const body of [
-    {planCode: 'starter', amount: 1},
-    {planCode: 'starter', price: 0},
-    {planCode: 'starter', amountMinor: 5},
-    {planCode: 'starter', currency: 'USD'},
-    {planCode: 'starter', intervalMonths: 99},
+    {planCode: 'samtill-pos-6m', amount: 1},
+    {planCode: 'samtill-pos-6m', price: 0},
+    {planCode: 'samtill-pos-6m', amountMinor: 5},
+    {planCode: 'samtill-pos-6m', currency: 'USD'},
+    {planCode: 'samtill-pos-6m', intervalMonths: 99},
   ]) {
     const resolution = resolveCheckoutPlan(PLANS, body);
     assert(!resolution.ok, `body ${JSON.stringify(body)} must be rejected`);
@@ -536,9 +551,9 @@ test('missing plan code and non-object bodies are rejected', () => {
 test('toPublicPlan exposes only safe camelCase fields', () => {
   const publicPlan = toPublicPlan(PLANS[0]);
   assertEqual(publicPlan, {
-    code: 'starter',
-    name: 'Starter',
-    amountMinor: 49900,
+    code: 'samtill-pos-6m',
+    name: 'SamTill POS — 6-Month Subscription',
+    amountMinor: 50000,
     currency: 'GHS',
     intervalMonths: 6,
   });

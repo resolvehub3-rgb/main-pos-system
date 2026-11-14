@@ -8,15 +8,15 @@ function buildFaqs(): Array<{q: string; a: string}> {
   },
   {
     q: 'How much does SamTill cost?',
-    a: 'SamTill is offered in three proposed packages — Starter, Business and Professional — with one-time licences for one computer. These prices are still a draft awaiting final approval by SamTeck Digital, so please enquire to confirm the current price before making any decision.',
+    a: 'SamTill POS is available as a single 6-Month Subscription for GH₵500.00. One upfront payment unlocks every SamTill POS feature — barcode checkout, inventory ledger, receipts, reports, and staff controls — with no tiered restrictions.',
   },
   {
-    q: 'Is the licence a subscription?',
-    a: 'Each package is proposed as a one-time licence for one computer, including the first six months of maintenance and support. Permanent use applies to the licensed version. Maintenance, support and updates after that initial period may require renewal under the final terms approved by SamTeck Digital.',
+    q: 'How long does the subscription last?',
+    a: 'Your subscription runs for six (6) calendar months from the date your payment is verified and activated. There are no automatic monthly bills — you can renew anytime for another 6 months when your period nears expiry.',
   },
   {
-    q: 'Do I pay online?',
-    a: 'No. Online payment is not available yet. You enquire first, agree the package and terms with SamTeck Digital directly, and payment is arranged between you and the business.',
+    q: 'How do I pay online?',
+    a: 'Click PAY NOW on the Pricing page to start secure Paystack checkout. You can pay with Mobile Money or Card, and your 6-month subscription activates automatically as soon as payment verification succeeds.',
   },
   {
     q: 'Can I install it myself?',

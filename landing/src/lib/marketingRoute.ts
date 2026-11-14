@@ -4,7 +4,7 @@
  * The marketing website serves dedicated pages at:
  *   /           → Homepage
  *   /features   → Product features & screenshots
- *   /pricing    → Packages & comparison
+ *   /pricing    → 6-Month Subscription pricing
  *   /about      → About SamTill & onboarding
  *   /contact    → Enquiry & business contact details
  *   /download   → Smart PWA installation & platform instructions

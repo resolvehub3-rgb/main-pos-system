@@ -63,9 +63,9 @@ export function accountAvailability(
 }
 
 const CHECKOUT_DISABLED_NOTICE =
-  'Online checkout is not open yet. Choose a package and send an enquiry — SamTeck Digital will confirm the price and arrange purchase with you directly.';
+  'Online checkout is not open yet on this deployment.';
 const CHECKOUT_NEEDS_ACCOUNT_NOTICE =
-  'Buying online needs a SamTill account: create one first (or sign in), then come back to this package.';
+  'Buying the 6-Month Subscription needs a SamTill account: create one first (or sign in), then complete payment.';
 
 /**
  * Checkout needs the payment switch AND the account switch (a payment is tied

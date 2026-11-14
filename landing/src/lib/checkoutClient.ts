@@ -34,6 +34,13 @@ export interface EntitlementSummary {
   validTo: string;
 }
 
+export interface SubscriptionSummary {
+  planCode: string;
+  status: string;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+}
+
 export type PlansFailureKind =
   | 'pricing_not_published'
   | 'not_configured'
@@ -62,6 +69,7 @@ export type VerifyFailureKind =
   | 'reference_invalid'
   | 'order_not_found'
   | 'payment_pending'
+  | 'payment_cancelled'
   | 'payment_failed'
   | 'amount_mismatch'
   | 'currency_mismatch'
@@ -94,6 +102,7 @@ export type VerifyResult =
       reference: string;
       outcome: string;
       entitlement: EntitlementSummary | null;
+      subscription?: SubscriptionSummary | null;
     }
   | {
       ok: false;
@@ -145,6 +154,18 @@ function readEntitlement(value: unknown): EntitlementSummary | null {
     return null;
   }
   return {productCode, status, validFrom, validTo};
+}
+
+function readSubscription(value: unknown): SubscriptionSummary | null {
+  if (!isRecord(value)) return null;
+  const {planCode, status, currentPeriodStart, currentPeriodEnd} = value;
+  if (typeof planCode !== 'string' || typeof status !== 'string') return null;
+  return {
+    planCode,
+    status,
+    currentPeriodStart: typeof currentPeriodStart === 'string' ? currentPeriodStart : null,
+    currentPeriodEnd: typeof currentPeriodEnd === 'string' ? currentPeriodEnd : null,
+  };
 }
 
 function readPlan(value: unknown): PublishedPlan | null {
@@ -416,6 +437,7 @@ export function classifyVerifyResponse(
       reference: typeof record.reference === 'string' ? record.reference : '',
       outcome: typeof record.outcome === 'string' ? record.outcome : 'unknown',
       entitlement: readEntitlement(record.entitlement),
+      subscription: readSubscription(record.subscription),
     };
   }
 
@@ -443,9 +465,15 @@ export function classifyVerifyResponse(
   }
 
   if (status === 402) {
-    // Paystack reported a non-success state (pending / abandoned / failed).
-    // Not auto-retried: the customer decides whether to check again.
-    return failure('payment_pending', serverMessage, {
+    // Paystack reported a non-success state (cancelled / failed / pending).
+    // Not auto-retried: the customer decides whether to retry checkout.
+    const kind: VerifyFailureKind =
+      code === 'payment_cancelled'
+        ? 'payment_cancelled'
+        : code === 'payment_failed'
+          ? 'payment_failed'
+          : 'payment_pending';
+    return failure(kind, serverMessage, {
       retryable: false,
       ...(reference !== undefined ? {reference} : {}),
     });
@@ -669,15 +697,14 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 };
 
 /**
- * Format a minor-unit amount for display: 49900 GHS → 'GH₵499'.
+ * Format a minor-unit amount for display: 50000 GHS → 'GH₵500.00'.
  * The value is display only — never sent to checkout.
  */
 export function formatMinorAmount(amountMinor: number, currency: string): string {
   const symbol = CURRENCY_SYMBOLS[currency.toUpperCase()] ?? `${currency.toUpperCase()} `;
   const major = amountMinor / 100;
-  const hasFraction = !Number.isInteger(major);
   return `${symbol}${major.toLocaleString('en-GH', {
-    minimumFractionDigits: hasFraction ? 2 : 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
@@ -686,7 +713,7 @@ export function formatMinorAmount(amountMinor: number, currency: string): string
 export function checkoutFailureMessage(kind: CheckoutFailureKind): string {
   switch (kind) {
     case 'checkout_disabled':
-      return 'Online checkout is not open yet. Please enquire to purchase.';
+      return 'Online checkout is not open yet. Please try again shortly.';
     case 'paystack_unavailable':
       return 'The payment provider is unavailable right now. Please try again shortly.';
     case 'rate_limited':

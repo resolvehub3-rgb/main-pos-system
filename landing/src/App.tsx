@@ -1,5 +1,4 @@
 import {useCallback, useEffect, useState} from 'react';
-import Comparison from './components/Comparison';
 import Contact from './components/Contact';
 import Faq from './components/Faq';
 import Features from './components/Features';
@@ -35,7 +34,7 @@ import {useHashRoute} from './lib/useHashRoute';
  * dedicated public routes:
  *   /           → Marketing homepage
  *   /features   → Product features & screenshots
- *   /pricing    → Packages & comparison
+ *   /pricing    → 6-Month Subscription pricing
  *   /about      → About SamTill & onboarding
  *   /contact    → Contact & enquiry
  *   /download   → Smart PWA installation & platform instructions
@@ -99,7 +98,7 @@ export default function App() {
   useEffect(() => {
     if (route.path !== '/') return;
     if (route.params.get('checkout') !== 'return') return;
-    const reference = route.params.get('reference');
+    const reference = route.params.get('reference') ?? route.params.get('trxref');
     if (!reference) return;
     window.history.replaceState({}, '', window.location.pathname);
     navigateTo(`/checkout?reference=${encodeURIComponent(reference)}`);
@@ -132,10 +131,7 @@ export default function App() {
             <Screenshots />
           </>
         ) : marketingRoute === '/pricing' ? (
-          <>
-            <Pricing />
-            <Comparison />
-          </>
+          <Pricing isStandalonePage />
         ) : marketingRoute === '/about' ? (
           <AboutPage onNavigate={handleNavigate} />
         ) : marketingRoute === '/contact' ? (

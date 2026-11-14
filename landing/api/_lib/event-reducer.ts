@@ -294,8 +294,7 @@ function reduceChargeSuccess(context: ReduceContext): Reduction {
     }
   }
 
-  // Link a Paystack subscription when the charge was part of one (only
-  // possible for card auto-renew, which is not enabled for Ghana MoMo).
+  // Link a Paystack subscription or activate/extend the single 6-month subscription record.
   const subscriptionCode = extractEventKeys(event).subscriptionCode;
   if (subscriptionCode) {
     if (context.subscription) {
@@ -318,6 +317,38 @@ function reduceChargeSuccess(context: ReduceContext): Reduction {
       };
     }
     reduction.notes.push('subscription_linked');
+  } else if (plan) {
+    const startMs = periodStartMs(entitlement, now);
+    const startIso = new Date(startMs).toISOString();
+    const endIso = addMonthsClamped(new Date(startMs), plan.interval_months).toISOString();
+
+    if (context.subscription) {
+      const patch: Partial<SubscriptionState> = {
+        status: 'active',
+        plan_code: plan.code,
+        auto_renew: false,
+        current_period_end: endIso,
+        cancel_at_period_end: false,
+        cancelled_at: null,
+      };
+      if (context.subscription.status !== 'active' || !context.subscription.current_period_start) {
+        patch.current_period_start = startIso;
+      }
+      reduction.subscriptionAction = 'update';
+      reduction.subscriptionPatch = patch;
+    } else {
+      reduction.subscriptionAction = 'create';
+      reduction.subscriptionPatch = {
+        user_id: order.user_id,
+        plan_code: plan.code,
+        paystack_subscription_code: null,
+        status: 'active',
+        auto_renew: false,
+        current_period_start: startIso,
+        current_period_end: endIso,
+      };
+    }
+    reduction.notes.push('subscription_activated');
   }
 
   return reduction;
