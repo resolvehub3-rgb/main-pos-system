@@ -16,15 +16,12 @@ export const SITE = {
 } as const;
 
 export const NAV_LINKS = [
-  {label: 'Home', href: '/'},
-  {label: 'Features', href: '/features'},
-  {label: 'Pricing', href: '/pricing'},
-  {label: 'About', href: '/about'},
-  {label: 'Contact', href: '/contact'},
+  {label: 'Features', href: '#features'},
+  {label: 'FAQ', href: '#faq'},
+  {label: 'Contact', href: '#contact'},
 ] as const;
 
 export const FOOTER_LINKS = [
-  {label: 'Install Guide', href: '/download'},
   {label: 'Privacy Policy', href: '/privacy.html'},
   {label: 'Terms of Service', href: '/terms.html'},
 ] as const;

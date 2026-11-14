@@ -38,44 +38,23 @@ async function withEnv<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-test('status: payment gates default enabled when unset and respect explicit false opt-out', async () => {
+test('status: payment gates are reported disabled and the backend is configured', async () => {
   await withEnv(async () => {
-    const savedCheckout = process.env.CHECKOUT_ENABLED;
-    const savedPublish = process.env.PUBLISH_PRICES;
-    delete process.env.CHECKOUT_ENABLED;
-    delete process.env.PUBLISH_PRICES;
-
     const response = statusGet(new Request('http://localhost/api/status', {method: 'GET'}));
     assertEqual(response.status, 200);
     const body = (await response.json()) as {
-      phase: string;
       flags: {checkoutEnabled: boolean; publishPrices: boolean; allowLivePayments: boolean};
       backendConfigured: boolean;
       endpoints: Array<{method: string; path: string}>;
     };
-    assertEqual(body.phase, 'ready');
-    assertEqual(body.flags.checkoutEnabled, true, 'CHECKOUT_ENABLED defaults enabled');
-    assertEqual(body.flags.publishPrices, true, 'PUBLISH_PRICES defaults enabled');
+    assertEqual(body.flags.checkoutEnabled, false, 'CHECKOUT_ENABLED unset');
+    assertEqual(body.flags.publishPrices, false, 'PUBLISH_PRICES unset');
     assertEqual(body.flags.allowLivePayments, false, 'ALLOW_LIVE_PAYMENTS unset');
     assertEqual(body.backendConfigured, true);
     assert(
       !body.endpoints.some((endpoint) => endpoint.path.includes('download')),
       'no download endpoint is advertised',
     );
-
-    process.env.CHECKOUT_ENABLED = 'false';
-    process.env.PUBLISH_PRICES = 'false';
-    const disabledResponse = statusGet(new Request('http://localhost/api/status', {method: 'GET'}));
-    const disabledBody = (await disabledResponse.json()) as {
-      flags: {checkoutEnabled: boolean; publishPrices: boolean};
-    };
-    assertEqual(disabledBody.flags.checkoutEnabled, false, 'CHECKOUT_ENABLED=false disables checkout');
-    assertEqual(disabledBody.flags.publishPrices, false, 'PUBLISH_PRICES=false hides prices');
-
-    if (savedCheckout === undefined) delete process.env.CHECKOUT_ENABLED;
-    else process.env.CHECKOUT_ENABLED = savedCheckout;
-    if (savedPublish === undefined) delete process.env.PUBLISH_PRICES;
-    else process.env.PUBLISH_PRICES = savedPublish;
   });
 });
 

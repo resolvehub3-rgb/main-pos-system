@@ -6,10 +6,19 @@ import {COMMERCE} from '../config/commerce';
 import {accountAvailability} from '../lib/availability';
 import {verifyEmailAddress} from '../lib/authFlow';
 import {getCommerceAuth, readCommerceEnv} from '../lib/commerceClient';
-import {nextRouteAfterSignIn, verificationParams, type ParsedRoute} from '../lib/hashRoute';
+import {verificationParams, type ParsedRoute} from '../lib/hashRoute';
 import {navigateTo} from '../lib/navigation';
-import {ensureProvisionedShop} from '../lib/shopProvisioning';
 import {createAuthProvider} from '../lib/supabaseAdapter';
+
+/**
+ * Email verification landing screen.
+ *
+ * The confirmation email redirects here with `token_hash`/`type` (or a PKCE
+ * `code`). A session is created ONLY if the provider accepts the link — the
+ * screen says "verified" solely in that case, and shows the provider's real
+ * error otherwise. A visit without parameters simply explains that the page
+ * belongs to the emailed link.
+ */
 
 type State =
   | {status: 'idle'}
@@ -24,8 +33,6 @@ export default function VerifyEmailPage({route}: {route: ParsedRoute}) {
 
   const paramsKey = route.params.toString();
   const pending = verificationParams(route.params);
-  const nextParam = route.params.get('next');
-  const nextRoute = nextRouteAfterSignIn(route.params);
 
   useEffect(() => {
     if (!availability.available || !pending) return;
@@ -34,27 +41,20 @@ export default function VerifyEmailPage({route}: {route: ParsedRoute}) {
 
     const client = getCommerceAuth();
     if (!client) {
-      setState({status: 'failed', message: 'The customer account service is not configured for this deployment yet.'});
+      setState({status: 'failed', message: 'The account service is not configured on this site yet.'});
       return;
     }
 
     let active = true;
     setState({status: 'verifying'});
     verifyEmailAddress(createAuthProvider(client), pending)
-      .then(async (result) => {
+      .then((result) => {
         if (!active) return;
         if (result.status === 'verified') {
-          const isRecovery = pending.mode === 'otp' && pending.type === 'recovery';
-          if (!isRecovery) {
-            await ensureProvisionedShop(client, {}, {createFallbackIfMissing: nextParam === 'checkout'}).catch(
-              () => null,
-            );
-          }
-          if (!active) return;
           setState({
             status: 'verified',
             message: 'Your email address has been verified.',
-            recovery: isRecovery,
+            recovery: pending.mode === 'otp' && pending.type === 'recovery',
           });
           return;
         }
@@ -68,7 +68,7 @@ export default function VerifyEmailPage({route}: {route: ParsedRoute}) {
     return () => {
       active = false;
     };
-  }, [availability.available, pending, paramsKey, nextParam]);
+  }, [availability.available, pending, paramsKey]);
 
   if (!availability.available) {
     return (
@@ -109,12 +109,10 @@ export default function VerifyEmailPage({route}: {route: ParsedRoute}) {
         ) : (
           <button
             type="button"
-            onClick={() => navigateTo(nextRoute)}
+            onClick={() => navigateTo('/account')}
             className="mt-5 w-full rounded-full bg-amber-700 px-6 py-3.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
           >
-            {nextParam === 'checkout'
-              ? 'Continue to 6-Month Subscription checkout →'
-              : 'Continue to my account →'}
+            Continue to my account →
           </button>
         )}
       </>

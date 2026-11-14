@@ -11,21 +11,8 @@ import { AddProductModal } from './components/AddProductModal';
 import { SupabaseConfigModal } from './components/SupabaseConfigModal';
 import { AuthPage } from './components/AuthPage';
 import { OfflineBanner } from './components/OfflineBanner';
-import { SubscriptionGate } from './components/SubscriptionGate';
-import { evaluateTenantAccess } from './lib/subscriptionGate';
 import { db } from './lib/supabaseClient';
-import {
-  isTerminalPath,
-  normalizePathname,
-  pathFromShopOwnerMenu,
-  POS_DASHBOARD_PATH,
-  POS_REGISTER_PATH,
-  POS_TERMINAL_PATH,
-  pushPosPath,
-  shopOwnerMenuFromPath,
-  syncAuthUrl,
-  type ShopOwnerMenu,
-} from './lib/roleRoute';
+import { syncAuthUrl } from './lib/roleRoute';
 import { UserAccount, CartItem, Sale, Product, Tenant, CustomerDisplayPayment } from './types';
 import { calculateCartTotals } from './lib/money';
 import { buildCustomerDisplayState } from './lib/customerDisplay';
@@ -54,12 +41,7 @@ export default function App() {
   // Authentication & Current User Session
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => db.getCurrentUser());
   const [selectedShopId, setSelectedShopId] = useState<string>('tenant-accra-mall');
-  const [shopOwnerViewingPOS, setShopOwnerViewingPOS] = useState<boolean>(() =>
-    typeof window !== 'undefined' ? isTerminalPath(window.location.pathname) : false
-  );
-  const [ownerMenu, setOwnerMenu] = useState<ShopOwnerMenu>(() =>
-    typeof window !== 'undefined' ? shopOwnerMenuFromPath(window.location.pathname) : 'overview'
-  );
+  const [shopOwnerViewingPOS, setShopOwnerViewingPOS] = useState<boolean>(false);
   const [, setTick] = useState<number>(0);
 
   // Modals state
@@ -114,100 +96,47 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Subscribe to real database updates (including remote/expired sign-outs)
+  // Subscribe to real database updates
   useEffect(() => {
     const unsubscribe = db.subscribe(() => {
       setTick((t) => t + 1);
+      // Keep currentUser state in sync with database if updated
       const current = db.getCurrentUser();
-      if (!current && currentUser) {
-        setCurrentUser(null);
-        setShopOwnerViewingPOS(false);
-        setPendingSignOut(false);
-      } else if (current && (!currentUser || current.id !== currentUser.id || current.role !== currentUser.role)) {
+      if (current && (!currentUser || current.id !== currentUser.id || current.role !== currentUser.role)) {
         setCurrentUser(current);
       }
     });
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Synchronize browser history (Back/Forward) with POS sub-routes under /app/*
-  useEffect(() => {
-    const onPopState = () => {
-      const path = window.location.pathname;
-      if (currentUser?.role === 'shop_owner') {
-        if (isTerminalPath(path)) {
-          setShopOwnerViewingPOS(true);
-        } else {
-          setShopOwnerViewingPOS(false);
-          setOwnerMenu(shopOwnerMenuFromPath(path));
-        }
-      }
-      syncAuthUrl(currentUser);
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, [currentUser]);
-
-  // Keep the address bar in sync with authentication and /app/ namespace rules.
+  // The address bar must show the signed-in role's own URL, never the auth
+  // page the operator happened to arrive on. Sign-in, session restore, a
+  // role change pushed over realtime and logout all pass through this state,
+  // so one effect covers every transition (see src/lib/roleRoute.ts).
   useEffect(() => {
     syncAuthUrl(currentUser);
-    if (currentUser?.role === 'shop_owner' && typeof window !== 'undefined') {
-      const path = window.location.pathname;
-      if (isTerminalPath(path)) {
-        setShopOwnerViewingPOS(true);
-      } else {
-        setOwnerMenu(shopOwnerMenuFromPath(path));
-      }
-    }
   }, [currentUser]);
-
-  const [checkoutReturnRef, setCheckoutReturnRef] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('checkout') !== 'return') return null;
-    return params.get('reference') ?? params.get('trxref');
-  });
-
-  // Clean Paystack query string from /app/dashboard after capturing return reference.
-  useEffect(() => {
-    if (!checkoutReturnRef || typeof window === 'undefined') return;
-    window.history.replaceState({}, '', window.location.pathname);
-  }, [checkoutReturnRef]);
 
   // Retrieve current database records
   const tenants = db.getTenants();
   const sales = db.getSales();
   const products = db.getProducts();
-  const matchedTenant =
+  const currentTenant: Tenant =
     tenants.find((t) => t.id === selectedShopId) ||
-    tenants.find((t) => t.id === currentUser?.tenant_id) ||
-    tenants[0];
-  const supabaseConfig = db.getConfig();
-  const currentTenant: Tenant = matchedTenant || {
-    id: currentUser?.tenant_id || `tenant-${currentUser?.id || 'store-1'}`,
-    name: currentUser?.shop_name || 'My Supermarket Store',
-    slug: 'my-supermarket',
-    phone: currentUser?.phone || '',
-    email: currentUser?.email || '',
-    address: 'Accra, Ghana',
-    currency: 'GHS',
-    is_active: true,
-    subscription_status: supabaseConfig.isConnected ? 'trial' : 'active',
-    created_at: currentUser?.created_at || new Date().toISOString(),
-  };
+    tenants[0] || {
+      id: currentUser?.tenant_id || `tenant-${currentUser?.id || 'store-1'}`,
+      name: currentUser?.shop_name || 'My Supermarket Store',
+      slug: 'my-supermarket',
+      phone: currentUser?.phone || '',
+      email: currentUser?.email || '',
+      address: 'Accra, Ghana',
+      currency: 'GHS',
+      is_active: true,
+      subscription_status: 'active',
+      created_at: currentUser?.created_at || new Date().toISOString(),
+    };
   const activeShift = db.getActiveShift(currentTenant.id);
-
-  // Refresh tenant subscription status on mount/user change when connected to Supabase.
-  useEffect(() => {
-    if (!currentUser?.tenant_id || currentUser.role === 'super_admin' || !supabaseConfig.isConnected) {
-      return;
-    }
-    void db.refreshTenantBilling(currentUser.tenant_id);
-  }, [currentUser?.id, currentUser?.tenant_id, currentUser?.role, supabaseConfig.isConnected]);
-
-  const tenantAccess = currentUser
-    ? evaluateTenantAccess(currentUser, matchedTenant ?? currentTenant)
-    : null;
+  const supabaseConfig = db.getConfig();
 
   // Cart totals for the customer display (same calculation the checkout panel
   // uses). Computed before the auth gate so the push below always has
@@ -387,13 +316,13 @@ export default function App() {
     // The active-cart recovery copy belongs to this signed-in session only —
     // drop it on sign-out so it can never surface for a later operator.
     if (currentUser?.tenant_id) clearActiveCart(currentUser.tenant_id, currentUser.id);
-    void db.logout();
-    // Rewrite the URL to /app/login *before* clearing the user, so the auth
-    // page mounts on the Login tab and never returns to the marketing site.
+    db.logout();
+    // Rewrite the URL to /login *before* clearing the user, so the auth page
+    // mounts on the Login tab. Without this the tab could fall back to
+    // Register for anyone whose first visit was the /register deep link.
     syncAuthUrl(null);
     setCurrentUser(null);
     setShopOwnerViewingPOS(false);
-    setOwnerMenu('overview');
     setPendingSignOut(false);
   };
 
@@ -589,10 +518,10 @@ export default function App() {
   // handleLogout → syncAuthUrl), so Register only appears for an explicit
   // /register deep link.
   if (!currentUser) {
-    const pathname =
-      typeof window !== 'undefined' ? normalizePathname(window.location.pathname) : '';
     const authTab: 'login' | 'register' =
-      pathname === POS_REGISTER_PATH || pathname === '/register' ? 'register' : 'login';
+      typeof window !== 'undefined' && window.location.pathname === '/register'
+        ? 'register'
+        : 'login';
     return (
       <AuthPage
         initialTab={authTab}
@@ -659,10 +588,7 @@ export default function App() {
             <span>Store Owner Till Testing Mode &bull; {currentTenant.name}</span>
           </div>
           <button
-            onClick={() => {
-              setShopOwnerViewingPOS(false);
-              pushPosPath(pathFromShopOwnerMenu(ownerMenu));
-            }}
+            onClick={() => setShopOwnerViewingPOS(false)}
             className="flex items-center gap-1.5 px-3 py-1 bg-[#F28C28] hover:bg-orange-600 text-white rounded-lg transition font-bold"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
@@ -671,82 +597,61 @@ export default function App() {
         </div>
       )}
 
-      {/* Main View Router based strictly on authenticated user's role & active subscription */}
+      {/* Main View Router based strictly on authenticated user's role */}
       <div className="flex-1">
-        {tenantAccess && !tenantAccess.allowed ? (
-          <SubscriptionGate
-            user={currentUser}
-            tenant={currentTenant}
-            decision={tenantAccess}
-            checkoutReturnReference={checkoutReturnRef}
-            onClearCheckoutReturn={() => setCheckoutReturnRef(null)}
-            onLogout={handleLogout}
+        {currentUser.role === 'super_admin' && (
+          <SuperAdminDashboard
+            tenants={tenants}
+            sales={sales}
+            products={products}
+            onAddShop={() => setShowAddProductModal(true)}
           />
-        ) : (
-          <>
-            {currentUser.role === 'super_admin' && (
-              <SuperAdminDashboard
-                tenants={tenants}
-                sales={sales}
-                products={products}
-                onAddShop={() => setShowAddProductModal(true)}
-              />
-            )}
+        )}
 
-            {currentUser.role === 'shop_owner' && (
-              shopOwnerViewingPOS ? (
-                <CashierPOS
-                  currentTenant={currentTenant}
-                  products={products.filter((p) => p.tenant_id === currentTenant.id)}
-                  activeShift={activeShift}
-                  pendingSignOut={pendingSignOut}
-                  onCancelSignOut={() => setPendingSignOut(false)}
-                  onCompleteSale={handleCompleteSale}
-                  onPrintLastReceipt={(sale, opts) =>
-                    setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
-                  }
-                  onOpenCustomerDisplay={openCustomerDisplay}
-                  cart={cart}
-                  setCart={setCart}
-                />
-              ) : (
-                <ShopOwnerDashboard
-                  currentTenant={currentTenant}
-                  currentUser={currentUser}
-                  sales={sales}
-                  products={products}
-                  activeMenu={ownerMenu}
-                  onMenuChange={(menu) => {
-                    setOwnerMenu(menu);
-                    pushPosPath(pathFromShopOwnerMenu(menu));
-                  }}
-                  onOpenAddProduct={() => setShowAddProductModal(true)}
-                  onOpenPOS={() => {
-                    setShopOwnerViewingPOS(true);
-                    pushPosPath(POS_TERMINAL_PATH);
-                  }}
-                  onOpenCustomerDisplay={openCustomerDisplay}
-                />
-              )
-            )}
+        {currentUser.role === 'shop_owner' && (
+          shopOwnerViewingPOS ? (
+            <CashierPOS
+              currentTenant={currentTenant}
+              products={products.filter((p) => p.tenant_id === currentTenant.id)}
+              activeShift={activeShift}
+              pendingSignOut={pendingSignOut}
+              onCancelSignOut={() => setPendingSignOut(false)}
+              onCompleteSale={handleCompleteSale}
+              onPrintLastReceipt={(sale, opts) =>
+                setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
+              }
+              onOpenCustomerDisplay={openCustomerDisplay}
+              cart={cart}
+              setCart={setCart}
+            />
+          ) : (
+            <ShopOwnerDashboard
+              currentTenant={currentTenant}
+              currentUser={currentUser}
+              sales={sales}
+              products={products}
+              onOpenAddProduct={() => setShowAddProductModal(true)}
+              onOpenPOS={() => setShopOwnerViewingPOS(true)}
+              onOpenCustomerDisplay={openCustomerDisplay}
+            />
+          )
+        )}
 
-            {currentUser.role === 'cashier' && (
-              <CashierPOS
-                currentTenant={currentTenant}
-                products={products.filter((p) => p.tenant_id === currentTenant.id)}
-                activeShift={activeShift}
-                pendingSignOut={pendingSignOut}
-                onCancelSignOut={() => setPendingSignOut(false)}
-                onCompleteSale={handleCompleteSale}
-                onPrintLastReceipt={(sale, opts) =>
-                  setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
-                }
-                onOpenCustomerDisplay={openCustomerDisplay}
-                cart={cart}
-                setCart={setCart}
-              />
-            )}
-          </>
+        {currentUser.role === 'cashier' && (
+          <CashierPOS
+            currentTenant={currentTenant}
+            products={products.filter((p) => p.tenant_id === currentTenant.id)}
+            activeShift={activeShift}
+            pendingSignOut={pendingSignOut}
+            onCancelSignOut={() => setPendingSignOut(false)}
+            onCompleteSale={handleCompleteSale}
+            onPrintLastReceipt={(sale, opts) =>
+              setActiveReceipt({ sale, autoPrint: Boolean(opts?.autoPrint) })
+            }
+            onOpenCustomerDisplay={openCustomerDisplay}
+            cart={cart}
+            setCart={setCart}
+          />
         )}
       </div>
 

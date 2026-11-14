@@ -1,9 +1,9 @@
 {
   "name": "SamTill POS",
   "short_name": "SamTill",
-  "id": "/app/",
-  "start_url": "/app/login",
-  "scope": "/app/",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "launch_handler": {

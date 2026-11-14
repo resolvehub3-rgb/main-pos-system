@@ -31,15 +31,12 @@ export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 200;
 
 export const FULL_NAME_MAX_LENGTH = 120;
-export const SHOP_NAME_MAX_LENGTH = 120;
 
 export interface RegistrationInput {
   email: string;
   password: string;
   fullName: string;
   phone: string;
-  shopName?: string;
-  shopAddress?: string;
 }
 
 export type RegistrationField = keyof RegistrationInput;
@@ -86,15 +83,6 @@ export function validatePhone(value: string): string | null {
   return null;
 }
 
-export function validateShopName(value: string): string | null {
-  const shop = value.trim();
-  if (shop === '') return 'Enter your shop or business name.';
-  if (shop.length > SHOP_NAME_MAX_LENGTH) {
-    return `Use at most ${SHOP_NAME_MAX_LENGTH} characters.`;
-  }
-  return null;
-}
-
 export function validateRegistration(input: RegistrationInput): FieldErrors<RegistrationField> {
   const errors: FieldErrors<RegistrationField> = {};
   const email = validateEmail(input.email);
@@ -105,15 +93,6 @@ export function validateRegistration(input: RegistrationInput): FieldErrors<Regi
   if (fullName) errors.fullName = fullName;
   const phone = validatePhone(input.phone);
   if (phone) errors.phone = phone;
-  return errors;
-}
-
-export function validateShopRegistration(
-  input: RegistrationInput & {shopName: string; shopAddress?: string},
-): FieldErrors<RegistrationField> {
-  const errors = validateRegistration(input);
-  const shopName = validateShopName(input.shopName);
-  if (shopName) errors.shopName = shopName;
   return errors;
 }
 

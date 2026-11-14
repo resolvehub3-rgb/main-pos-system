@@ -35,22 +35,6 @@ export function readFlag(name: string): boolean {
   return (readEnv(name) ?? '').toLowerCase() === 'true';
 }
 
-/** Opt-out boolean flags: active unless explicitly set to "false". */
-export function readEnabledByDefaultFlag(name: string): boolean {
-  const raw = readEnv(name);
-  if (raw === undefined) return true;
-  return raw.toLowerCase() !== 'false';
-}
-
-/** First defined & non-empty env variable among candidate names. */
-function readFirstEnv(names: string[]): string | undefined {
-  for (const name of names) {
-    const value = readEnv(name);
-    if (value !== undefined) return value;
-  }
-  return undefined;
-}
-
 /**
  * Who may receive an installer download link:
  * - `entitlement`      (default): only customers with an active paid
@@ -66,12 +50,12 @@ function readFirstEnv(names: string[]): string | undefined {
 export type DownloadAccessMode = 'entitlement' | 'verified_account';
 
 export interface CommerceConfig {
-  /** Supabase project URL, no trailing slash. */
+  /** Commerce Supabase project URL, no trailing slash. */
   supabaseUrl: string;
   /** Service-role key. Server-only; bypasses RLS; never sent to the browser. */
   supabaseServiceRoleKey: string;
-  /** Optional HS256 secret used for fast local verification when issued HS256 JWTs. */
-  authJwtSecret?: string;
+  /** HS256 secret used to verify Supabase Auth access tokens. */
+  authJwtSecret: string;
   /** Paystack secret key. Test mode unless ALLOW_LIVE_PAYMENTS=true. */
   paystackSecretKey: string;
   /**
@@ -89,13 +73,18 @@ export interface CommerceConfig {
   installerBucket: string;
   /** Lifetime of generated signed download URLs, seconds (60..3600). */
   downloadLinkTtlSeconds: number;
-  /** Master gate for starting payments (enabled unless CHECKOUT_ENABLED=false). */
+  /**
+   * Master gate for starting payments. Must be explicitly "true" and stays
+   * false until the owner approves the commercial decisions in
+   * landing/docs/01-commercial-decisions.md.
+   */
   checkoutEnabled: boolean;
-  /** Gate for publishing prices through /api/plans (enabled unless PUBLISH_PRICES=false). */
+  /** Gate for publishing prices through /api/plans. Off until approval. */
   publishPrices: boolean;
   /**
    * Server-side access mode for POST /api/download. Defaults to
-   * `entitlement` (fail-closed to paid customers only).
+   * `entitlement` (fail-closed to paid customers only). See
+   * DownloadAccessMode above and docs/03-environment-variables.md.
    */
   downloadAccessMode: DownloadAccessMode;
   /** Optional salt for hashing client IPs in audit/download records. */
@@ -121,20 +110,6 @@ function normalizeBaseUrl(value: string): string | null {
   }
 }
 
-function resolveAppBaseUrl(): string | undefined {
-  const explicit = readEnv('APP_BASE_URL');
-  if (explicit !== undefined) return explicit;
-  const vercelProd = readEnv('VERCEL_PROJECT_PRODUCTION_URL');
-  if (vercelProd !== undefined) {
-    return vercelProd.startsWith('http') ? vercelProd : `https://${vercelProd}`;
-  }
-  const vercelUrl = readEnv('VERCEL_URL');
-  if (vercelUrl !== undefined) {
-    return vercelUrl.startsWith('http') ? vercelUrl : `https://${vercelUrl}`;
-  }
-  return undefined;
-}
-
 /**
  * Load and validate all commerce configuration.
  * Returns ok:false with the *names* of missing/invalid variables (never
@@ -144,22 +119,17 @@ export function getCommerceConfig(): ConfigResult {
   const missing: string[] = [];
   const invalid: string[] = [];
 
-  const supabaseUrlRaw = readFirstEnv(['SUPABASE_COMMERCE_URL', 'SUPABASE_URL']);
-  if (supabaseUrlRaw === undefined) missing.push('SUPABASE_COMMERCE_URL');
+  const need = (name: string): string | undefined => {
+    const value = readEnv(name);
+    if (value === undefined) missing.push(name);
+    return value;
+  };
 
-  const serviceRoleKey = readFirstEnv([
-    'SUPABASE_COMMERCE_SERVICE_ROLE_KEY',
-    'SUPABASE_SERVICE_ROLE_KEY',
-  ]);
-  if (serviceRoleKey === undefined) missing.push('SUPABASE_COMMERCE_SERVICE_ROLE_KEY');
-
-  const authJwtSecret = readEnv('SUPABASE_AUTH_JWT_SECRET');
-
-  const paystackSecretKey = readEnv('PAYSTACK_SECRET_KEY');
-  if (paystackSecretKey === undefined) missing.push('PAYSTACK_SECRET_KEY');
-
-  const appBaseUrlRaw = resolveAppBaseUrl();
-  if (appBaseUrlRaw === undefined) missing.push('APP_BASE_URL');
+  const supabaseUrlRaw = need('SUPABASE_COMMERCE_URL');
+  const serviceRoleKey = need('SUPABASE_COMMERCE_SERVICE_ROLE_KEY');
+  const authJwtSecret = need('SUPABASE_AUTH_JWT_SECRET');
+  const paystackSecretKey = need('PAYSTACK_SECRET_KEY');
+  const appBaseUrlRaw = need('APP_BASE_URL');
 
   let supabaseUrl: string | null = null;
   if (supabaseUrlRaw !== undefined) {
@@ -169,6 +139,8 @@ export function getCommerceConfig(): ConfigResult {
 
   if (serviceRoleKey !== undefined) {
     if (serviceRoleKey.startsWith('sb_publishable_')) {
+      // Common mistake: pasting the publishable (client) key into the
+      // service-role slot. That key cannot bypass RLS and must not be used.
       invalid.push('SUPABASE_COMMERCE_SERVICE_ROLE_KEY(wrong_key_class)');
     } else if (!serviceRoleKey.startsWith('sb_secret_') && !serviceRoleKey.startsWith('ey')) {
       invalid.push('SUPABASE_COMMERCE_SERVICE_ROLE_KEY');
@@ -182,11 +154,13 @@ export function getCommerceConfig(): ConfigResult {
   let paystackMode: 'test' | 'live' = 'test';
   if (paystackSecretKey !== undefined) {
     if (!paystackSecretKey.startsWith('sk_')) {
+      // Catches pasting the publishable key (pk_...) into the secret slot.
       invalid.push('PAYSTACK_SECRET_KEY');
     } else if (!paystackSecretKey.startsWith('sk_test_')) {
       if (readFlag('ALLOW_LIVE_PAYMENTS')) {
         paystackMode = 'live';
       } else {
+        // Refuse live keys unless live payments are explicitly allowed.
         invalid.push('PAYSTACK_SECRET_KEY(not_test_mode)');
       }
     }
@@ -203,6 +177,8 @@ export function getCommerceConfig(): ConfigResult {
     invalid.push('INSTALLER_BUCKET');
   }
 
+  // Download access mode: explicit opt-in, safe default. An unknown value is
+  // a configuration error (fail closed), never a silent fallback.
   let downloadAccessMode: DownloadAccessMode = 'entitlement';
   const downloadModeRaw = readEnv('DOWNLOAD_ACCESS_MODE');
   if (downloadModeRaw !== undefined) {
@@ -234,7 +210,7 @@ export function getCommerceConfig(): ConfigResult {
     config: {
       supabaseUrl: supabaseUrl as string,
       supabaseServiceRoleKey: serviceRoleKey as string,
-      ...(authJwtSecret !== undefined ? {authJwtSecret} : {}),
+      authJwtSecret: authJwtSecret as string,
       paystackSecretKey: paystackSecretKey as string,
       paystackWebhookSecret: readEnv('PAYSTACK_WEBHOOK_SECRET') ?? (paystackSecretKey as string),
       paystackPublicKey: readEnv('PAYSTACK_PUBLIC_KEY'),
@@ -242,8 +218,8 @@ export function getCommerceConfig(): ConfigResult {
       appBaseUrl: appBaseUrl as string,
       installerBucket,
       downloadLinkTtlSeconds,
-      checkoutEnabled: readEnabledByDefaultFlag('CHECKOUT_ENABLED'),
-      publishPrices: readEnabledByDefaultFlag('PUBLISH_PRICES'),
+      checkoutEnabled: readFlag('CHECKOUT_ENABLED'),
+      publishPrices: readFlag('PUBLISH_PRICES'),
       downloadAccessMode,
       auditHashSalt: readEnv('AUDIT_HASH_SALT'),
     },

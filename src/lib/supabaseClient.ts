@@ -269,35 +269,6 @@ class DatabaseService {
    * fall back to the clean baseline.
    */
   private handleStorageEvent = (event: StorageEvent): void => {
-    if (event.key === STORAGE_KEY_SESSION) {
-      if (!event.newValue && this.currentUser) {
-        this.currentUser = null;
-        this.listeners.forEach((listener) => {
-          try {
-            listener();
-          } catch (err) {
-            console.error('Error in database subscriber:', err);
-          }
-        });
-      } else if (event.newValue) {
-        try {
-          const nextUser = JSON.parse(event.newValue) as UserAccount;
-          if (!this.currentUser || this.currentUser.id !== nextUser.id || this.currentUser.role !== nextUser.role) {
-            this.currentUser = nextUser;
-            this.listeners.forEach((listener) => {
-              try {
-                listener();
-              } catch (err) {
-                console.error('Error in database subscriber:', err);
-              }
-            });
-          }
-        } catch {
-          // Ignore malformed session payload
-        }
-      }
-      return;
-    }
     if (event.key !== null && event.key !== STORAGE_KEY_DATA) return;
     this.applyStoredData(event.newValue);
     this.listeners.forEach((listener) => {
@@ -504,18 +475,6 @@ class DatabaseService {
       case 'INITIAL_SESSION':
       case 'SIGNED_IN':
       case 'TOKEN_REFRESHED': {
-        if (event === 'INITIAL_SESSION' && !session?.user && this.currentUser) {
-          // If Supabase reports no persisted/valid initial session while a
-          // client is active and no offline sb-pos-auth token remains (or
-          // refresh failed), clear the stale cached user so protected /app/*
-          // routes require a fresh sign-in.
-          const hasStoredAuth =
-            typeof localStorage !== 'undefined' && Boolean(localStorage.getItem('sb-pos-auth'));
-          if (!hasStoredAuth || (typeof navigator !== 'undefined' && navigator.onLine !== false)) {
-            this.setCurrentUser(null);
-            break;
-          }
-        }
         // Restore the application user only when one is not already loaded, so
         // a token refresh does not clobber an active in-memory session.
         if (!this.currentUser && session?.user) {
@@ -2279,61 +2238,26 @@ class DatabaseService {
     const client = this.supabaseClient;
     if (!client || !tenantId) return;
 
-    const { data, error } = await client.from('tenants').select('*').eq('id', tenantId).limit(1);
-    if (error) {
-      console.warn('Remote sign-in could not load the shop:', error.message);
-    } else if (data?.length) {
-      const tenant = adoptTenant(data[0] as Record<string, unknown>);
-      bindMirrorId(tenant.id);
-      const existingIdx = this.tenants.findIndex((t) => t.id === tenant.id);
-      if (existingIdx >= 0) {
-        this.tenants[existingIdx] = tenant;
-      } else {
+    if (!this.tenants.some((t) => t.id === tenantId)) {
+      const { data, error } = await client.from('tenants').select('*').eq('id', tenantId).limit(1);
+      if (error) {
+        console.warn('Remote sign-in could not load the shop:', error.message);
+      } else if (data?.length) {
+        const tenant = data[0] as Tenant;
+        bindMirrorId(tenant.id);
         this.tenants.push(tenant);
       }
     }
 
     if (!this.branches.some((b) => b.tenant_id === tenantId)) {
-      const { data: branchData, error: branchError } = await client
-        .from('branches')
-        .select('*')
-        .eq('tenant_id', tenantId);
-      if (branchError) {
-        console.warn('Remote sign-in could not load the branches:', branchError.message);
-      } else if (branchData?.length) {
-        const branches = branchData.map((row) => adoptBranch(row as Record<string, unknown>));
+      const { data, error } = await client.from('branches').select('*').eq('tenant_id', tenantId);
+      if (error) {
+        console.warn('Remote sign-in could not load the branches:', error.message);
+      } else if (data?.length) {
+        const branches = data as Branch[];
         branches.forEach((b) => bindMirrorId(b.id));
         this.branches.push(...branches);
       }
-    }
-  }
-
-  public async refreshTenantBilling(tenantId: string): Promise<Tenant | null> {
-    const client = this.supabaseClient;
-    if (!client || !tenantId) return null;
-    const { data, error } = await client.from('tenants').select('*').eq('id', tenantId).limit(1);
-    if (error || !data?.length) return null;
-    const tenant = adoptTenant(data[0] as Record<string, unknown>);
-    bindMirrorId(tenant.id);
-    const idx = this.tenants.findIndex((t) => t.id === tenant.id);
-    if (idx >= 0) {
-      this.tenants[idx] = tenant;
-    } else {
-      this.tenants.push(tenant);
-    }
-    this.saveState();
-    this.notify();
-    return tenant;
-  }
-
-  public async getAuthAccessToken(): Promise<string | null> {
-    const client = this.supabaseClient;
-    if (!client) return null;
-    try {
-      const { data } = await client.auth.getSession();
-      return data.session?.access_token ?? null;
-    } catch {
-      return null;
     }
   }
 
@@ -2641,13 +2565,6 @@ class DatabaseService {
    */
   public async logout(): Promise<void> {
     this.setCurrentUser(null);
-    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-      try {
-        localStorage.removeItem('sb-pos-auth');
-      } catch {
-        // Ignore storage restrictions
-      }
-    }
     if (this.supabaseClient) {
       await signOutSupabase(this.supabaseClient as SupabaseAuthClient);
     }

@@ -1,31 +1,29 @@
-import {Suspense, lazy} from 'react';
 import {createRoot} from 'react-dom/client';
+import App from './App.tsx';
+import LandingApp from '../landing/src/App.tsx';
+import {CustomerDisplayWindow} from './components/CustomerDisplayWindow.tsx';
 import {SplashScreen} from './components/SplashScreen.tsx';
 import {applyStandaloneTitle, initInstallPrompt, registerServiceWorker} from './lib/pwa.ts';
-import {isPosPath} from './lib/roleRoute.ts';
+import {isAuthEntryPath, WORKSPACE_PATHS} from './lib/roleRoute.ts';
 import './index.css';
 import '../landing/src/index.css';
 
-const App = lazy(() => import('./App.tsx'));
-const LandingApp = lazy(() => import('../landing/src/App.tsx'));
-const CustomerDisplayWindow = lazy(() =>
-  import('./components/CustomerDisplayWindow.tsx').then((mod) => ({
-    default: mod.CustomerDisplayWindow,
-  })),
-);
-
 /**
- * Application entry point separating:
- *  1. Customer Display popup (`?view=customer-display`)
- *  2. SamTill POS Application (`/app/*` namespace + legacy POS aliases)
- *  3. Public Marketing Website (`/`, `/features`, `/pricing`, `/about`,
- *     `/contact`, `/download`)
+ * The customer display popup window loads `/?view=customer-display` (opened
+ * by the cashier's "Customer Display" button) and renders only the
+ * customer-facing root. Everything else — including the normal PWA entry
+ * point — is the existing App exactly as before.
  *
- * Route-level lazy imports ensure the public marketing website never executes
- * POS runtime modules (or initializes Supabase POS Realtime/Auth listeners),
- * and the POS application never mounts the marketing layout.
- * Installed PWAs launch at `start_url: "/app/login"` inside `scope: "/app/"`,
- * so they always enter the POS branch directly.
+ * The main entry opens with the branded splash screen, which fades out to
+ * reveal either the login tab (no session) or the dashboard (session already
+ * restored). The customer display never shows a splash — it must come up
+ * straight onto the customer-facing view.
+ *
+ * PWA plumbing: the service worker is registered once (production only) and
+ * the browser install prompt is captured so the header can offer a real
+ * "Install app" button (src/lib/pwa.ts). When running as an installed app,
+ * the window title is shortened to "SamTill POS" before first render so the
+ * standalone title bar shows the app name instead of the SEO page title.
  */
 registerServiceWorker();
 initInstallPrompt();
@@ -35,27 +33,19 @@ const isCustomerDisplayView =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).get('view') === 'customer-display';
 const isPosRoute =
-  typeof window !== 'undefined' && isPosPath(window.location.pathname);
-
-if (isPosRoute && typeof document !== 'undefined') {
-  document.title = 'SamTill POS';
-}
+  typeof window !== 'undefined' &&
+  // Auth entry points (/login, /register) plus the per-role workspaces
+  // (/admin, /shop-owner, /cashier — see src/lib/roleRoute.ts).
+  (isAuthEntryPath(window.location.pathname) ||
+    WORKSPACE_PATHS.includes(window.location.pathname));
 
 createRoot(document.getElementById('root')!).render(
-  isCustomerDisplayView ? (
-    <Suspense fallback={null}>
-      <CustomerDisplayWindow />
-    </Suspense>
-  ) : isPosRoute ? (
+  isCustomerDisplayView ? <CustomerDisplayWindow /> : isPosRoute ? (
     <>
-      <Suspense fallback={null}>
-        <App />
-      </Suspense>
+      <App />
       <SplashScreen />
     </>
   ) : (
-    <Suspense fallback={null}>
-      <LandingApp />
-    </Suspense>
+    <LandingApp />
   ),
 );

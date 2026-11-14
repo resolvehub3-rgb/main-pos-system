@@ -14,14 +14,7 @@
  * only ever return that user's rows. No browser RLS path exists.
  */
 
-import {
-  loadActiveMembershipForUser,
-  loadEntitlementsForUser,
-  loadSubscriptionForUser,
-  loadTenantById,
-  type SubscriptionRowFull,
-  type TenantBillingRow,
-} from './_lib/context.ts';
+import {loadEntitlementsForUser, loadSubscriptionForUser, type SubscriptionRowFull} from './_lib/context.ts';
 import {getCommerceConfig} from './_lib/env.ts';
 import {apiError, json, methodGuard, notConfigured, readJsonBody} from './_lib/http.ts';
 import {requireSession} from './_lib/session.ts';
@@ -40,19 +33,6 @@ function serializeSubscription(row: SubscriptionRowFull | null): Record<string, 
   };
 }
 
-function serializeTenant(row: TenantBillingRow | null): Record<string, unknown> | null {
-  if (!row) return null;
-  return {
-    id: row.id,
-    name: row.name,
-    isActive: row.is_active,
-    subscriptionStatus: row.subscription_status,
-    subscriptionPlanCode: row.subscription_plan_code,
-    subscriptionStartedAt: row.subscription_started_at,
-    subscriptionExpiresAt: row.subscription_expires_at,
-  };
-}
-
 export async function GET(request: Request): Promise<Response> {
   const guard = methodGuard(request, 'GET');
   if (guard) return guard;
@@ -65,15 +45,10 @@ export async function GET(request: Request): Promise<Response> {
   if (!session.ok) return session.response;
 
   try {
-    const [subscription, entitlements, membership] = await Promise.all([
+    const [subscription, entitlements] = await Promise.all([
       loadSubscriptionForUser(config, session.user.userId),
       loadEntitlementsForUser(config, session.user.userId),
-      loadActiveMembershipForUser(config, session.user.userId).catch(() => null),
     ]);
-
-    const tenant = membership
-      ? await loadTenantById(config, membership.tenant_id).catch(() => null)
-      : null;
 
     return json({
       subscription: serializeSubscription(subscription),
@@ -84,7 +59,6 @@ export async function GET(request: Request): Promise<Response> {
         validFrom: row.valid_from,
         validTo: row.valid_to,
       })),
-      tenant: serializeTenant(tenant),
     });
   } catch (cause) {
     console.error(`commerce: GET /api/subscription failed: ${String(cause)}`);

@@ -24,16 +24,11 @@
 import {applyProviderEvent, type ApplyResult} from './_lib/apply-reduction.ts';
 import {writeAudit} from './_lib/audit.ts';
 import {
-  loadActiveMembershipForUser,
   loadEntitlementForUser,
   loadOrder,
   loadReduceContext,
-  loadSubscriptionForUser,
-  loadTenantById,
   type EntitlementRowFull,
   type OrderRow,
-  type SubscriptionRowFull,
-  type TenantBillingRow,
 } from './_lib/context.ts';
 import {getCommerceConfig} from './_lib/env.ts';
 import type {ProviderEvent} from './_lib/event-reducer.ts';
@@ -63,53 +58,6 @@ function summarizeEntitlement(row: EntitlementRowFull | null): Record<string, un
     status: row.status,
     validFrom: row.valid_from,
     validTo: row.valid_to,
-  };
-}
-
-function summarizeSubscription(row: SubscriptionRowFull | null): Record<string, unknown> | null {
-  if (!row) return null;
-  return {
-    planCode: row.plan_code,
-    status: row.status,
-    currentPeriodStart: row.current_period_start,
-    currentPeriodEnd: row.current_period_end,
-  };
-}
-
-function summarizeTenant(row: TenantBillingRow | null): Record<string, unknown> | null {
-  if (!row) return null;
-  return {
-    id: row.id,
-    name: row.name,
-    isActive: row.is_active,
-    subscriptionStatus: row.subscription_status,
-    subscriptionPlanCode: row.subscription_plan_code,
-    subscriptionStartedAt: row.subscription_started_at,
-    subscriptionExpiresAt: row.subscription_expires_at,
-  };
-}
-
-async function loadVerifySummaries(
-  config: Parameters<typeof loadEntitlementForUser>[0],
-  userId: string,
-  tenantId: string | null,
-) {
-  const [entitlement, subscription, resolvedTenantId] = await Promise.all([
-    loadEntitlementForUser(config, userId).catch(() => null),
-    loadSubscriptionForUser(config, userId).catch(() => null),
-    tenantId
-      ? Promise.resolve(tenantId)
-      : loadActiveMembershipForUser(config, userId)
-          .then((m) => m?.tenant_id ?? null)
-          .catch(() => null),
-  ]);
-  const tenant = resolvedTenantId
-    ? await loadTenantById(config, resolvedTenantId).catch(() => null)
-    : null;
-  return {
-    entitlement: summarizeEntitlement(entitlement),
-    subscription: summarizeSubscription(subscription),
-    tenant: summarizeTenant(tenant),
   };
 }
 
@@ -154,12 +102,12 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (order.status === 'paid') {
-    const summaries = await loadVerifySummaries(config, order.user_id, order.tenant_id);
+    const entitlement = await loadEntitlementForUser(config, order.user_id).catch(() => null);
     return json({
       status: 'paid',
       reference: order.reference,
       outcome: 'already_verified',
-      ...summaries,
+      entitlement: summarizeEntitlement(entitlement),
     });
   }
 
@@ -172,20 +120,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (verified.status !== 'success') {
-    const normalized = verified.status.toLowerCase();
-    if (normalized === 'abandoned' || normalized === 'cancelled') {
-      return apiError(402, 'payment_cancelled', 'Payment was cancelled before completion.', {
-        extra: {reference: order.reference, providerStatus: verified.status},
-      });
-    }
-    if (normalized === 'failed' || normalized === 'reversed') {
-      return apiError(402, 'payment_failed', 'Payment failed. You have not been charged — please try again.', {
-        extra: {reference: order.reference, providerStatus: verified.status},
-      });
-    }
-    return apiError(402, 'payment_not_successful', `Payment status is "${verified.status}".`, {
-      extra: {reference: order.reference, providerStatus: verified.status},
-    });
+    return apiError(402, 'payment_not_successful', `Payment status is "${verified.status}".`);
   }
 
   // Integrity: the provider's copy must match what we ordered.
@@ -257,12 +192,12 @@ export async function POST(request: Request): Promise<Response> {
     // This verify attempt was already seen and did not finish — re-check.
     const refreshed = await loadOrder(config, order.reference).catch(() => null);
     if (refreshed?.status === 'paid') {
-      const summaries = await loadVerifySummaries(config, order.user_id, refreshed.tenant_id);
+      const entitlement = await loadEntitlementForUser(config, order.user_id).catch(() => null);
       return json({
         status: 'paid',
         reference: order.reference,
         outcome: 'already_verified',
-        ...summaries,
+        entitlement: summarizeEntitlement(entitlement),
       });
     }
     return apiError(502, 'recording_in_progress', 'The payment is still being recorded. Please try again shortly.');
@@ -277,11 +212,11 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const summaries = await loadVerifySummaries(config, order.user_id, order.tenant_id);
+  const entitlement = await loadEntitlementForUser(config, order.user_id).catch(() => null);
   return json({
     status: 'paid',
     reference: order.reference,
     outcome: outcome ?? 'unknown',
-    ...summaries,
+    entitlement: summarizeEntitlement(entitlement),
   });
 }

@@ -36,7 +36,6 @@ import {
   fetchMyAccess,
   fetchPublishedPlans,
   formatMinorAmount,
-  hasActiveSubscriptionAccess,
   startCheckout,
   verifyPayment,
   verifyWithBackoff,
@@ -48,7 +47,7 @@ import {
   nextRouteAfterSignIn,
   parseRoute,
 } from '../src/lib/hashRoute.ts';
-import {PACKAGES, PRICING_APPROVED, SUBSCRIPTION_PLAN, SUBSCRIPTION_TERMS} from '../src/config/pricing.ts';
+import {COMPARISON_ROWS, LICENCE_TERMS, PACKAGES, PRICING_APPROVED} from '../src/config/pricing.ts';
 import {COMMERCE} from '../src/config/commerce.ts';
 
 const API = 'https://api.example.com';
@@ -61,9 +60,9 @@ function jsonResponse(status: number, body: unknown, headers: Record<string, str
 }
 
 const PLAN_ROW = {
-  code: 'samtill-pos-6m',
-  name: 'SamTill POS — 6-Month Subscription',
-  amountMinor: 50000,
+  code: 'starter',
+  name: 'Starter',
+  amountMinor: 49900,
   currency: 'GHS',
   intervalMonths: 6,
 };
@@ -84,14 +83,14 @@ test('plans: a published price list parses with server amounts only', () => {
   assert(result.ok, 'published list succeeds');
   if (result.ok) {
     assertEqual(result.plans.length, 1);
-    assertEqual(result.plans[0].amountMinor, 50000, 'server amount survives');
+    assertEqual(result.plans[0].amountMinor, 49900, 'server amount survives');
     assertEqual(result.plans[0].intervalMonths, 6);
   }
 });
 
 test('plans: a malformed 200 body never becomes a price', () => {
   const missingField = classifyPlansResponse(200, {
-    plans: [{code: 'samtill-pos-6m', name: '6-Month Subscription', amountMinor: 'free', currency: 'GHS', intervalMonths: 6}],
+    plans: [{code: 'starter', name: 'Starter', amountMinor: 'free', currency: 'GHS', intervalMonths: 6}],
   });
   assert(!missingField.ok && missingField.kind === 'invalid_response', 'non-numeric amount rejected');
 
@@ -156,7 +155,7 @@ test('checkout: a valid answer returns the hosted URL and the server plan', () =
   if (result.ok) {
     assertEqual(result.reference, 'st_abcdef0123456789');
     assertEqual(result.authorizationUrl, 'https://checkout.paystack.com/abc');
-    assertEqual(result.plan.amountMinor, 50000, 'price came from the server');
+    assertEqual(result.plan.amountMinor, 49900, 'price came from the server');
   }
 });
 
@@ -223,7 +222,7 @@ test('checkout: the request carries a plan code and NO price field', async () =>
   const result = await startCheckout({
     apiBase: API,
     accessToken: 'token-abc',
-    planCode: 'samtill-pos-6m',
+    planCode: 'starter',
     fetchImpl: async (input, init) => {
       captured = {
         url: String(input),
@@ -243,14 +242,14 @@ test('checkout: the request carries a plan code and NO price field', async () =>
   const observed = captured as {url: string; auth: string | null; body: unknown};
   assertEqual(observed.url, 'https://api.example.com/api/checkout');
   assertEqual(observed.auth, 'Bearer token-abc', 'session token is sent');
-  assertEqual(observed.body, {planCode: 'samtill-pos-6m'}, 'only the plan code is sent — never a price');
+  assertEqual(observed.body, {planCode: 'starter'}, 'only the plan code is sent — never a price');
 });
 
 test('checkout: a thrown network error becomes a safe result, not a crash', async () => {
   const result = await startCheckout({
     apiBase: '',
     accessToken: 't',
-    planCode: 'samtill-pos-6m',
+    planCode: 'starter',
     fetchImpl: async () => {
       throw new Error('network down (stubbed)');
     },
@@ -284,26 +283,14 @@ test('verify: a 200 that is not "paid" is never shown as success', () => {
   assert(result.retryable, 'can be re-checked');
 });
 
-test('verify: pending, cancelled and failed payments stay distinct', () => {
-  const pending = classifyVerifyResponse(402, {
+test('verify: pending payments are reported as pending, not failed', () => {
+  const result = classifyVerifyResponse(402, {
     error: 'payment_not_successful',
     message: 'Payment status is "pending".',
   });
-  assert(!pending.ok && pending.kind === 'payment_pending');
-  assert(!pending.retryable, 'the customer decides when to check again');
-  assert(pending.message.includes('pending'), 'provider status shown honestly');
-
-  const cancelled = classifyVerifyResponse(402, {
-    error: 'payment_cancelled',
-    message: 'Payment was cancelled before completion.',
-  });
-  assert(!cancelled.ok && cancelled.kind === 'payment_cancelled' && !cancelled.retryable);
-
-  const failed = classifyVerifyResponse(402, {
-    error: 'payment_failed',
-    message: 'Payment failed.',
-  });
-  assert(!failed.ok && failed.kind === 'payment_failed' && !failed.retryable);
+  assert(!result.ok && result.kind === 'payment_pending');
+  assert(!result.retryable, 'the customer decides when to check again');
+  assert(result.message.includes('pending'), 'provider status shown honestly');
 });
 
 test('verify: not-found, invalid reference and review cases stay distinct', () => {
@@ -434,12 +421,12 @@ test('backoff: gives up after the scheduled attempts when the network is down', 
 test('access: entitlements parse for the account page', () => {
   const result = classifyAccessResponse(200, {
     subscription: null,
-    entitlements: [{...ENTITLEMENT, planCode: 'samtill-pos-6m'}],
+    entitlements: [{...ENTITLEMENT, planCode: 'starter'}],
   });
   assert(result.ok, 'licence list parses');
   if (result.ok) {
     assertEqual(result.entitlements.length, 1);
-    assertEqual(result.entitlements[0].planCode, 'samtill-pos-6m');
+    assertEqual(result.entitlements[0].planCode, 'starter');
   }
 
   const empty = classifyAccessResponse(200, {subscription: null, entitlements: []});
@@ -469,79 +456,6 @@ test('access: the request is authenticated and cache-free', async () => {
     },
   });
   assertEqual(auth, 'Bearer token-xyz', 'bearer token sent');
-});
-
-test('checkout: 409 already_subscribed prevents duplicate purchase and returnTo passes through', async () => {
-  const blocked = classifyCheckoutResponse(409, {
-    error: 'already_subscribed',
-    message: 'Your SamTill POS 6-month subscription is already active.',
-  });
-  assert(!blocked.ok && blocked.kind === 'already_subscribed' && !blocked.retryable);
-
-  let sentBody: unknown = null;
-  await startCheckout({
-    apiBase: API,
-    accessToken: 'tok',
-    planCode: 'samtill-pos-6m',
-    returnTo: 'pos',
-    fetchImpl: async (_input, init) => {
-      sentBody = init?.body ? JSON.parse(String(init.body)) : null;
-      return jsonResponse(200, {
-        reference: 'st_pos_12345678',
-        authorizationUrl: 'https://checkout.paystack.com/pos',
-        plan: PLAN_ROW,
-      });
-    },
-  });
-  assertEqual(sentBody, {planCode: 'samtill-pos-6m', returnTo: 'pos'});
-});
-
-test('access: active tenant or unexpired entitlement unlocks without double charging', () => {
-  const now = Date.parse('2026-11-01T00:00:00.000Z');
-  const activeAccess = classifyAccessResponse(200, {
-    subscription: null,
-    entitlements: [{...ENTITLEMENT, planCode: 'samtill-pos-6m'}],
-    tenant: {
-      id: 'tenant-1',
-      name: 'Accra Fresh Mart',
-      isActive: true,
-      subscriptionStatus: 'active',
-      subscriptionPlanCode: 'samtill-pos-6m',
-      subscriptionStartedAt: '2026-10-28T10:00:00.000Z',
-      subscriptionExpiresAt: '2027-04-28T10:00:00.000Z',
-    },
-  });
-  assert(activeAccess.ok);
-  if (activeAccess.ok) {
-    assertEqual(activeAccess.tenant?.name, 'Accra Fresh Mart');
-    const summary = hasActiveSubscriptionAccess(activeAccess, now);
-    assertEqual(summary.active, true);
-    assertEqual(summary.validTo, '2027-04-28T10:00:00.000Z');
-  }
-
-  const expiredAccess = classifyAccessResponse(200, {
-    subscription: null,
-    entitlements: [
-      {
-        ...ENTITLEMENT,
-        validFrom: '2025-01-01T00:00:00.000Z',
-        validTo: '2025-07-01T00:00:00.000Z',
-      },
-    ],
-    tenant: {
-      id: 'tenant-1',
-      name: 'Accra Fresh Mart',
-      isActive: true,
-      subscriptionStatus: 'trial',
-      subscriptionPlanCode: null,
-      subscriptionStartedAt: null,
-      subscriptionExpiresAt: null,
-    },
-  });
-  assert(expiredAccess.ok);
-  if (expiredAccess.ok) {
-    assertEqual(hasActiveSubscriptionAccess(expiredAccess, now).active, false);
-  }
 });
 
 // ---------------------------------------------------------------------------
@@ -594,10 +508,12 @@ test('routing: Paystack return parameters survive query parsing', () => {
 // Display helpers
 // ---------------------------------------------------------------------------
 
-test('display: minor units format cleanly as GH₵500.00', () => {
-  assertEqual(formatMinorAmount(50000, 'GHS'), 'GH₵500.00');
+test('display: minor units format as GHS without stray decimals', () => {
+  assertEqual(formatMinorAmount(49900, 'GHS'), 'GH₵499');
+  assertEqual(formatMinorAmount(89900, 'GHS'), 'GH₵899');
+  assertEqual(formatMinorAmount(149900, 'GHS'), 'GH₵1,499');
   assertEqual(formatMinorAmount(49950, 'GHS'), 'GH₵499.50');
-  assertEqual(formatMinorAmount(10000, 'NGN'), '₦100.00', 'unknown-but-known currency symbol');
+  assertEqual(formatMinorAmount(10000, 'NGN'), '₦100', 'unknown-but-known currency symbol');
 });
 
 test('display: every checkout failure kind has a customer-readable message', () => {
@@ -615,52 +531,48 @@ test('display: every checkout failure kind has a customer-readable message', () 
 });
 
 // ---------------------------------------------------------------------------
-// Approved commercial copy (Single 6-Month Subscription)
+// Approved commercial copy (Phase 0)
 // ---------------------------------------------------------------------------
 
-test('commercial: pricing is a single GH₵500.00 6-Month Subscription plan', () => {
+test('commercial: pricing is approved and the one-time tiers are the ones on file', () => {
   assertEqual(PRICING_APPROVED, true, 'PRICING_APPROVED is true');
-  assertEqual(PACKAGES.length, 1, 'exactly one subscription package exists');
-  assertEqual(SUBSCRIPTION_PLAN.id, 'samtill-pos-6m');
-  assertEqual(SUBSCRIPTION_PLAN.productName, 'SamTill POS');
-  assertEqual(SUBSCRIPTION_PLAN.name, '6-Month Subscription');
-  assertEqual(SUBSCRIPTION_PLAN.price, 500);
-  assertEqual(SUBSCRIPTION_PLAN.amountMinor, 50000);
-  assertEqual(SUBSCRIPTION_PLAN.durationLabel, '6 Months');
-  assertEqual(SUBSCRIPTION_PLAN.durationMonths, 6);
-  assertEqual(SUBSCRIPTION_PLAN.paymentType, 'Single upfront payment');
+  assertEqual(
+    PACKAGES.map((pkg) => pkg.price),
+    [499, 899, 1499],
+    'approved prices',
+  );
+  assert(PACKAGES.every((pkg) => pkg.licenceType === 'One-time licence'), 'one-time only');
+  assert(PACKAGES.every((pkg) => pkg.licenceSeats === '1 computer'), 'one computer each');
+  assert(PACKAGES.every((pkg) => !pkg.draftTierFeatures), 'no draft feature notices');
+  assertEqual(new Set(PACKAGES.map((pkg) => pkg.id)).size, PACKAGES.length, 'package ids unique (they are plan codes)');
 });
 
-test('commercial: subscription terms describe 6 calendar months activation without legacy drafts', () => {
-  assertEqual(SUBSCRIPTION_TERMS.durationMonths, 6);
-  assert(!SUBSCRIPTION_TERMS.renewalNote.includes('finalised'), 'renewal note is final');
-  assert(!SUBSCRIPTION_TERMS.renewalNote.includes('before launch'), 'no "before launch" wording');
-  assert(SUBSCRIPTION_TERMS.summary.includes('GH₵500.00'), 'summary mentions GH₵500.00');
+test('commercial: no "to be confirmed" rows remain in the comparison table', () => {
+  assertEqual(COMPARISON_ROWS.length > 0, true, 'comparison rows exist');
+  assert(COMPARISON_ROWS.every((row) => !row.ownerReview), 'every row is confirmed');
+  assert(
+    COMPARISON_ROWS.every((row) => row.values.every((value) => !value.includes('To be confirmed'))),
+    'no placeholder values',
+  );
 });
 
-test('commercial: paymentsEnabled switch is enabled for online checkout', () => {
-  assertEqual(COMMERCE.paymentsEnabled, true, 'paymentsEnabled is enabled');
-  assertEqual(COMMERCE.accountEnabled, true, 'accountEnabled ships true');
+test('commercial: licence terms no longer promise that terms are coming', () => {
+  assert(!LICENCE_TERMS.renewalNote.includes('finalised'), 'renewal note is final');
+  assert(!LICENCE_TERMS.renewalNote.includes('before launch'), 'no "before launch" wording');
+  assert(LICENCE_TERMS.renewalNote.includes('does not stop working'), 'states the customer guarantee');
+  assertEqual(LICENCE_TERMS.includedSupportMonths, 6, 'six months included');
 });
 
-test('commercial: legacy Starter, Business, and Professional tiers are absent from UI copy', () => {
-  const filesToScan = [
-    '../src/config/pricing.ts',
-    '../src/components/Pricing.tsx',
-    '../src/components/Faq.tsx',
-    '../src/pages/CheckoutPage.tsx',
-  ];
-  for (const file of filesToScan) {
-    const src = readFileSync(new URL(file, import.meta.url), 'utf8');
-    assert(!/\b(Starter|Business|Professional)\b/.test(src), `${file} has no legacy tier names`);
-    assert(!/\bEnquire about\b/i.test(src), `${file} has no legacy Enquire buttons`);
-  }
-  const contactSrc = readFileSync(new URL('../src/config/contact.ts', import.meta.url), 'utf8')
-    .replace(/Business hours/gi, '');
-  assert(!/\b(Starter|Business|Professional)\b/.test(contactSrc), 'contact.ts has no legacy tier names');
+test('commercial: the payment switch is still off until the backend exists', () => {
+  assertEqual(COMMERCE.paymentsEnabled, false, 'paymentsEnabled ships false');
+  assertEqual(COMMERCE.accountEnabled, true, 'accountEnabled ships true (approval-gated)');
 });
 
 test('sql: no invalid privileges are granted or revoked on a sequence', () => {
+  // Postgres sequences accept ONLY USAGE and SELECT. Naming INSERT/UPDATE/
+  // DELETE/TRUNCATE on a sequence aborts the whole migration (invalid
+  // privilege type INSERT for sequence) — which is exactly how the commerce
+  // migration died on its first run, leaving public.plans missing.
   const INVALID_SEQUENCE_PRIVILEGE = /\b(insert|update|delete|truncate|references|trigger)\b[^;\n]*\bon[^;\n]*\bsequences?\b/i;
 
   const files = [
@@ -670,6 +582,7 @@ test('sql: no invalid privileges are granted or revoked on a sequence', () => {
 
   for (const file of files) {
     const raw = readFileSync(new URL(file, import.meta.url), 'utf8');
+    // Strip `--` comments so documentation about the rule is not flagged.
     const sql = raw
       .split('\n')
       .map((line) => line.replace(/--.*$/, ''))
@@ -703,26 +616,31 @@ test('sql: the seed can only run where the migration has created the tables', ()
   );
 });
 
-test('commercial: seeded plan exactly matches GH₵500.00 (50000 pesewas) 6-month subscription and deactivates old tiers', () => {
+test('commercial: seeded plan amounts exactly match the approved package prices', () => {
+  // Guards the seed file against the classic pesewas slip (89900 vs 89000):
+  // the database is the only thing that decides what a customer is charged,
+  // so it must equal the website copy × 100, for every tier.
   const sql = readFileSync(new URL('../db/seeds/0001_approved_plans.sql', import.meta.url), 'utf8');
 
-  const rowPattern = /'samtill-pos-6m'[\s\S]*?\n\s*(\d{4,6}),\n\s*'GHS'/;
-  const match = sql.match(rowPattern);
-  assert(match, 'seed has a row for samtill-pos-6m');
-  assertEqual(Number(match[1]), SUBSCRIPTION_PLAN.amountMinor, 'seeded in pesewas (50000)');
+  for (const pkg of PACKAGES) {
+    const rowPattern = new RegExp(`'${pkg.id}'[\\s\\S]*?\\n\\s*(\\d{4,6}),\\n\\s*'GHS'`);
+    const match = sql.match(rowPattern);
+    assert(match, `seed has a row for ${pkg.id}`);
+    assertEqual(
+      Number(match[1]),
+      pkg.price * 100,
+      `${pkg.id} is seeded in pesewas (price × 100)`,
+    );
+  }
 
-  assert(
-    sql.includes("set active = false") && sql.includes("'starter', 'business', 'professional'"),
-    'deactivates legacy three-tier plans',
-  );
   assertEqual(
     (sql.match(/'GHS',\n    'one_time',\n    6,/g) ?? []).length,
-    1,
-    'exactly one active 6-month upfront subscription plan seeded',
+    PACKAGES.length,
+    'every seeded plan is a one-time licence granting 6 months of access',
   );
   assertEqual(
     (sql.match(/'samtill-pos',\n    null,\n    true/g) ?? []).length,
-    1,
-    'exactly one active plan row seeded',
+    PACKAGES.length,
+    'every seeded plan is active with no auto-renewal plan code',
   );
 });

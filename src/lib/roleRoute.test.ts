@@ -4,119 +4,48 @@ import assert from 'node:assert/strict';
 import {
   authPathFor,
   isAuthEntryPath,
-  isPosPath,
-  isTerminalPath,
-  pathFromShopOwnerMenu,
-  POS_ADMIN_PATH,
-  POS_DASHBOARD_PATH,
-  POS_INVENTORY_PATH,
-  POS_LOGIN_PATH,
-  POS_PRODUCTS_PATH,
-  POS_REGISTER_PATH,
-  POS_REPORTS_PATH,
-  POS_SETTINGS_PATH,
-  POS_TERMINAL_PATH,
   rolePathFor,
-  shopOwnerMenuFromPath,
   syncAuthUrl,
+  WORKSPACE_PATHS,
 } from './roleRoute.ts';
 
-test('each role has its own /app/ workspace URL', () => {
-  assert.equal(rolePathFor('super_admin'), POS_ADMIN_PATH);
-  assert.equal(rolePathFor('shop_owner'), POS_DASHBOARD_PATH);
-  assert.equal(rolePathFor('cashier'), POS_TERMINAL_PATH);
-  assert.equal(rolePathFor('unknown_role'), POS_DASHBOARD_PATH);
+test('each role has its own workspace URL', () => {
+  assert.equal(rolePathFor('super_admin'), '/admin');
+  assert.equal(rolePathFor('shop_owner'), '/shop-owner');
+  assert.equal(rolePathFor('cashier'), '/cashier');
+  // A role this build does not recognise still opens a workspace — it must
+  // never be handed an auth page while a session exists.
+  assert.equal(rolePathFor('superadmin'), '/app');
 });
 
-test('isPosPath isolates /app/* and legacy POS paths from marketing routes', () => {
-  assert.equal(isPosPath('/app'), true);
-  assert.equal(isPosPath('/app/'), true);
-  assert.equal(isPosPath('/app/login'), true);
-  assert.equal(isPosPath('/app/dashboard'), true);
-  assert.equal(isPosPath('/app/pos'), true);
-  assert.equal(isPosPath('/app/products'), true);
-  assert.equal(isPosPath('/app/inventory'), true);
-  assert.equal(isPosPath('/app/reports'), true);
-  assert.equal(isPosPath('/app/settings'), true);
-  assert.equal(isPosPath('/login'), true);
-  assert.equal(isPosPath('/register'), true);
-
-  // Public marketing routes must NEVER be treated as POS routes.
-  assert.equal(isPosPath('/'), false);
-  assert.equal(isPosPath('/features'), false);
-  assert.equal(isPosPath('/pricing'), false);
-  assert.equal(isPosPath('/about'), false);
-  assert.equal(isPosPath('/contact'), false);
-  assert.equal(isPosPath('/download'), false);
+test('the workspace paths are the ones the POS entry point recognises', () => {
+  for (const role of ['super_admin', 'shop_owner', 'cashier']) {
+    assert.ok(WORKSPACE_PATHS.includes(rolePathFor(role)), `${role} path is a workspace`);
+  }
+  // Auth pages are entry points, not workspaces.
+  assert.ok(!WORKSPACE_PATHS.includes('/login'));
+  assert.ok(!WORKSPACE_PATHS.includes('/register'));
+  assert.ok(isAuthEntryPath('/login') && isAuthEntryPath('/register'));
+  assert.ok(!isAuthEntryPath('/admin'));
 });
 
-test('isAuthEntryPath recognizes /app/login, /app/register and legacy aliases', () => {
-  assert.equal(isAuthEntryPath('/app/login'), true);
-  assert.equal(isAuthEntryPath('/app/register'), true);
-  assert.equal(isAuthEntryPath('/login'), true);
-  assert.equal(isAuthEntryPath('/register'), true);
-  assert.equal(isAuthEntryPath('/app/dashboard'), false);
-  assert.equal(isAuthEntryPath('/'), false);
+test('signing in never leaves /register (or /login) in the address bar', () => {
+  // The complaint this exists for: login from the register tab must land on
+  // the role's URL, whatever the arrival URL was.
+  assert.equal(authPathFor({ role: 'super_admin' }, '/register'), '/admin');
+  assert.equal(authPathFor({ role: 'shop_owner' }, '/register'), '/shop-owner');
+  assert.equal(authPathFor({ role: 'cashier' }, '/register'), '/cashier');
+  assert.equal(authPathFor({ role: 'cashier' }, '/login'), '/cashier');
 });
 
-test('signing in redirects away from /app/login, /app/register, and /app/ to role dashboard', () => {
-  assert.equal(authPathFor({ role: 'super_admin' }, '/app/register'), POS_ADMIN_PATH);
-  assert.equal(authPathFor({ role: 'shop_owner' }, '/app/register'), POS_DASHBOARD_PATH);
-  assert.equal(authPathFor({ role: 'shop_owner' }, '/app/login'), POS_DASHBOARD_PATH);
-  assert.equal(authPathFor({ role: 'shop_owner' }, '/app/'), POS_DASHBOARD_PATH);
-  assert.equal(authPathFor({ role: 'cashier' }, '/app/login'), POS_TERMINAL_PATH);
-  assert.equal(authPathFor({ role: 'cashier' }, '/app/'), POS_TERMINAL_PATH);
-});
-
-test('authenticated sub-routes are preserved on refresh for authorized roles and blocked for unauthorized roles', () => {
-  assert.equal(authPathFor({ role: 'shop_owner' }, POS_PRODUCTS_PATH), POS_PRODUCTS_PATH);
-  assert.equal(authPathFor({ role: 'shop_owner' }, POS_INVENTORY_PATH), POS_INVENTORY_PATH);
-  assert.equal(authPathFor({ role: 'shop_owner' }, POS_REPORTS_PATH), POS_REPORTS_PATH);
-  assert.equal(authPathFor({ role: 'shop_owner' }, POS_SETTINGS_PATH), POS_SETTINGS_PATH);
-  assert.equal(authPathFor({ role: 'shop_owner' }, POS_TERMINAL_PATH), POS_TERMINAL_PATH);
-  assert.equal(authPathFor({ role: 'shop_owner' }, POS_ADMIN_PATH), POS_DASHBOARD_PATH);
-
-  // Cashiers only have access to the sales terminal (/app/pos)
-  assert.equal(authPathFor({ role: 'cashier' }, POS_TERMINAL_PATH), POS_TERMINAL_PATH);
-  assert.equal(authPathFor({ role: 'cashier' }, POS_DASHBOARD_PATH), POS_TERMINAL_PATH);
-  assert.equal(authPathFor({ role: 'cashier' }, POS_SETTINGS_PATH), POS_TERMINAL_PATH);
-
-  // Super admin only uses /app/admin
-  assert.equal(authPathFor({ role: 'super_admin' }, POS_ADMIN_PATH), POS_ADMIN_PATH);
-  assert.equal(authPathFor({ role: 'super_admin' }, POS_DASHBOARD_PATH), POS_ADMIN_PATH);
-});
-
-test('logged-out visitors on any protected /app/* route redirect to /app/login, never /', () => {
-  assert.equal(authPathFor(null, '/app'), POS_LOGIN_PATH);
-  assert.equal(authPathFor(null, '/app/'), POS_LOGIN_PATH);
-  assert.equal(authPathFor(null, POS_DASHBOARD_PATH), POS_LOGIN_PATH);
-  assert.equal(authPathFor(null, POS_TERMINAL_PATH), POS_LOGIN_PATH);
-  assert.equal(authPathFor(null, POS_PRODUCTS_PATH), POS_LOGIN_PATH);
-  assert.equal(authPathFor(null, POS_INVENTORY_PATH), POS_LOGIN_PATH);
-  assert.equal(authPathFor(null, POS_REPORTS_PATH), POS_LOGIN_PATH);
-  assert.equal(authPathFor(null, POS_SETTINGS_PATH), POS_LOGIN_PATH);
-  assert.equal(authPathFor(null, POS_ADMIN_PATH), POS_LOGIN_PATH);
-  assert.equal(authPathFor(null, '/login'), POS_LOGIN_PATH);
-
-  // /app/register (and legacy /register) stays on /app/register
-  assert.equal(authPathFor(null, '/app/register'), POS_REGISTER_PATH);
-  assert.equal(authPathFor(null, '/register'), POS_REGISTER_PATH);
-});
-
-test('shop owner menu maps cleanly to and from /app/* paths', () => {
-  assert.equal(pathFromShopOwnerMenu('overview'), POS_DASHBOARD_PATH);
-  assert.equal(pathFromShopOwnerMenu('products'), POS_PRODUCTS_PATH);
-  assert.equal(pathFromShopOwnerMenu('inventory'), POS_INVENTORY_PATH);
-  assert.equal(pathFromShopOwnerMenu('reports'), POS_REPORTS_PATH);
-  assert.equal(pathFromShopOwnerMenu('settings'), POS_SETTINGS_PATH);
-
-  assert.equal(shopOwnerMenuFromPath(POS_DASHBOARD_PATH), 'overview');
-  assert.equal(shopOwnerMenuFromPath(POS_PRODUCTS_PATH), 'products');
-  assert.equal(shopOwnerMenuFromPath(POS_INVENTORY_PATH), 'inventory');
-  assert.equal(shopOwnerMenuFromPath(POS_REPORTS_PATH), 'reports');
-  assert.equal(shopOwnerMenuFromPath(POS_SETTINGS_PATH), 'settings');
-  assert.equal(isTerminalPath(POS_TERMINAL_PATH), true);
-  assert.equal(isTerminalPath(POS_DASHBOARD_PATH), false);
+test('a logged-out deep link keeps working per page', () => {
+  // /register must remain the register page for people who have not signed up.
+  assert.equal(authPathFor(null, '/register'), '/register');
+  assert.equal(authPathFor(null, '/login'), '/login');
+  // A workspace URL with no session behind it resolves to the login screen —
+  // the URL may not claim to be a dashboard that is not rendered.
+  assert.equal(authPathFor(null, '/admin'), '/login');
+  assert.equal(authPathFor(null, '/shop-owner'), '/login');
 });
 
 /** Minimal browser stand-in: records what the URL was rewritten to. */
@@ -143,18 +72,19 @@ function withBrowser<T>(stub: unknown, run: () => T): T {
 }
 
 test('syncAuthUrl rewrites the URL on sign-in and carries the query along', () => {
-  const { stub, written } = fakeBrowser('/app/register', '?source=nav');
+  const { stub, written } = fakeBrowser('/register', '?source=nav');
   withBrowser(stub, () => syncAuthUrl({ role: 'cashier' }));
 
-  assert.deepEqual(written, ['/app/pos?source=nav']);
+  assert.deepEqual(written, ['/cashier?source=nav']);
 });
 
-test('syncAuthUrl rewrites to /app/login on sign-out and stays put when already right', () => {
-  const logout = fakeBrowser('/app/dashboard');
+test('syncAuthUrl rewrites to /login on sign-out and stays put when already right', () => {
+  const logout = fakeBrowser('/shop-owner');
   withBrowser(logout.stub, () => syncAuthUrl(null));
-  assert.deepEqual(logout.written, ['/app/login']);
+  assert.deepEqual(logout.written, ['/login']);
 
-  const settled = fakeBrowser('/app/admin');
+  // Nothing to do — no history churn for a URL that is already correct.
+  const settled = fakeBrowser('/admin');
   withBrowser(settled.stub, () => syncAuthUrl({ role: 'super_admin' }));
   assert.deepEqual(settled.written, []);
 });

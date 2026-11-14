@@ -31,17 +31,11 @@ function toSession(session: {access_token: string; user?: {id: string; email?: s
 export function createAuthProvider(client: SupabaseClient): AuthProvider {
   return {
     async signUp(input) {
-      const signUpOptions =
-        input.data || input.options
-          ? {
-              ...(input.options ?? {}),
-              ...(input.data ? {data: input.data} : {}),
-            }
-          : undefined;
       const {data, error} = await client.auth.signUp({
         email: input.email,
         password: input.password,
-        ...(signUpOptions ? {options: signUpOptions} : {}),
+        ...(input.data ? {data: input.data} : {}),
+        ...(input.options ? {options: input.options} : {}),
       });
       const identities = data.user?.identities ?? null;
       return {

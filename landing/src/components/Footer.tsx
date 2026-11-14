@@ -4,23 +4,12 @@ import {FOOTER_LINKS, NAV_LINKS, SITE} from '../config/site';
 import {accountAvailability} from '../lib/availability';
 import {readCommerceEnv} from '../lib/commerceClient';
 
-import {navigateMarketing} from '../lib/marketingRoute';
-
 export default function Footer() {
   const year = new Date().getFullYear();
 
   // Mirror the availability the site actually has: the footer must never
   // claim "no registrations" once those screens are switched on.
   const selfServiceOpen = accountAvailability(COMMERCE, readCommerceEnv()).available;
-
-  const handleNavClick = (
-    event: React.MouseEvent<HTMLAnchorElement>,
-    href: string,
-  ) => {
-    if (href.endsWith('.html') || href.startsWith('/app')) return;
-    event.preventDefault();
-    navigateMarketing(href);
-  };
 
   return (
     <footer className="border-t border-navy-800 bg-navy-950">
@@ -53,30 +42,12 @@ export default function Footer() {
                 <li key={link.href}>
                   <a
                     href={link.href}
-                    onClick={(event) => handleNavClick(event, link.href)}
                     className="text-sm text-navy-300 transition-colors hover:text-amber-400"
                   >
                     {link.label}
                   </a>
                 </li>
               ))}
-              <li>
-                <a
-                  href="/download"
-                  onClick={(event) => handleNavClick(event, '/download')}
-                  className="text-sm text-navy-300 transition-colors hover:text-amber-400"
-                >
-                  Install SamTill
-                </a>
-              </li>
-              <li>
-                <a
-                  href="/app/login"
-                  className="text-sm font-semibold text-amber-300 transition-colors hover:text-amber-400"
-                >
-                  POS Login
-                </a>
-              </li>
             </ul>
           </nav>
 
@@ -93,7 +64,6 @@ export default function Footer() {
                 <li key={link.href}>
                   <a
                     href={link.href}
-                    onClick={(event) => handleNavClick(event, link.href)}
                     className="text-sm font-semibold text-navy-200 underline decoration-navy-600 underline-offset-4 transition-colors hover:text-amber-400 hover:decoration-amber-400"
                   >
                     {link.label}

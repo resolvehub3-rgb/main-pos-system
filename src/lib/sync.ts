@@ -293,10 +293,6 @@ export function tenantRow(t: Tenant): Record<string, unknown> {
     is_active: t.is_active,
     // `cancelled` is valid in the schema but not in the app's union.
     subscription_status: t.subscription_status === 'suspended' ? 'suspended' : t.subscription_status,
-    ...(t.subscription_plan_code !== undefined ? { subscription_plan_code: t.subscription_plan_code } : {}),
-    ...(t.subscription_started_at !== undefined ? { subscription_started_at: t.subscription_started_at } : {}),
-    ...(t.subscription_expires_at !== undefined ? { subscription_expires_at: t.subscription_expires_at } : {}),
-    ...(t.last_payment_reference !== undefined ? { last_payment_reference: t.last_payment_reference } : {}),
     created_at: t.created_at,
   };
 }

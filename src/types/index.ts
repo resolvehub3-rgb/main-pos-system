@@ -19,10 +19,6 @@ export interface Tenant {
   currency: string;
   is_active: boolean;
   subscription_status: 'active' | 'trial' | 'past_due' | 'suspended';
-  subscription_plan_code?: string;
-  subscription_started_at?: string;
-  subscription_expires_at?: string;
-  last_payment_reference?: string;
   created_at: string;
 }
 

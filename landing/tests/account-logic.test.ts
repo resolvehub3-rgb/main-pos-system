@@ -32,8 +32,6 @@ import {
   validatePassword,
   validatePhone,
   validateRegistration,
-  validateShopName,
-  validateShopRegistration,
 } from '../src/lib/validation.ts';
 import {COMMERCE} from '../src/config/commerce.ts';
 
@@ -170,9 +168,9 @@ test('gates: registration form appears only when switched on AND configured', ()
   assertEqual(result.reason, 'available');
 });
 
-test('gates: shipped commerce flags — accounts and Pay Now checkout enabled', () => {
+test('gates: shipped commerce flags — accounts open (approval-gated), payments still off', () => {
   assertEqual(COMMERCE.accountEnabled, true, 'accountEnabled ships true (approval-gated)');
-  assertEqual(COMMERCE.paymentsEnabled, true, 'paymentsEnabled ships true');
+  assertEqual(COMMERCE.paymentsEnabled, false, 'paymentsEnabled ships false');
 });
 
 // ---------------------------------------------------------------------------
@@ -453,40 +451,4 @@ test('auth errors: unknown codes fall back to a context-specific message', () =>
 
   const none = classifyAuthError(null, 'signIn');
   assert(none.kind === 'unknown' && none.message.includes('sign you in'), 'context-sensitive fallback');
-});
-
-test('shop registration validates shop name and forwards shop metadata on signUp', async () => {
-  assert(validateShopName('') !== null, 'empty shop name rejected');
-  assertEqual(validateShopName('Makola Provisions'), null);
-
-  const invalidShop = validateShopRegistration({
-    ...VALID_INPUT,
-    shopName: '   ',
-  });
-  assert(Boolean(invalidShop.shopName), 'shopName error flagged');
-
-  let capturedData: Record<string, unknown> | undefined;
-  const {provider} = baseProvider();
-  const capturingProvider: AuthProvider = {
-    ...provider,
-    async signUp(input) {
-      capturedData = input.data;
-      return provider.signUp(input);
-    },
-  };
-
-  const missingShopOutcome = await registerAccount(capturingProvider, VALID_INPUT, {
-    requireShopName: true,
-  });
-  assertEqual(missingShopOutcome.status, 'invalid_input');
-
-  const okOutcome = await registerAccount(
-    capturingProvider,
-    {...VALID_INPUT, shopName: 'Makola Provisions', shopAddress: 'Accra Central'},
-    {requireShopName: true},
-  );
-  assertEqual(okOutcome.status, 'pending_verification');
-  assertEqual(capturedData?.shop_name, 'Makola Provisions');
-  assertEqual(capturedData?.shop_address, 'Accra Central');
-  assertEqual(capturedData?.full_name, 'Ama Mensah');
 });
